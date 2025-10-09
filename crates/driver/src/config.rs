@@ -2,20 +2,37 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum RunRunOption {
+pub enum OsSpecific {
     Unified(String),
-    Platform { unix: String, win: String },
+    UnixWin {
+        unix: String,
+        win: String,
+    },
+    LinuxMacWin {
+        linux: String,
+        mac: String,
+        win: String,
+    },
 }
 
-impl RunRunOption {
-    pub fn run(&self) -> &str {
+impl OsSpecific {
+    pub fn get(&self) -> &str {
         match self {
-            RunRunOption::Unified(run) => run,
-            RunRunOption::Platform { unix, win } => {
+            OsSpecific::Unified(run) => run,
+            OsSpecific::UnixWin { unix, win } => {
                 if cfg!(windows) {
                     win
                 } else {
                     unix
+                }
+            }
+            OsSpecific::LinuxMacWin { linux, mac, win } => {
+                if cfg!(windows) {
+                    win
+                } else if cfg!(target_os = "macos") {
+                    mac
+                } else {
+                    linux
                 }
             }
         }
@@ -24,9 +41,9 @@ impl RunRunOption {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunOption {
-    pub run: RunRunOption,
+    pub run: OsSpecific,
     #[serde(default)]
-    pub compile: Option<String>,
+    pub compile: Option<OsSpecific>,
     #[serde(default)]
     pub watch: Vec<String>,
     #[serde(default)]
@@ -35,6 +52,9 @@ pub struct RunOption {
 
 impl RunOption {
     pub fn run(&self) -> &str {
-        self.run.run()
+        self.run.get()
+    }
+    pub fn compile(&self) -> Option<&str> {
+        self.compile.as_ref().map(|c| c.get())
     }
 }

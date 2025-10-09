@@ -90,7 +90,7 @@ impl<M: Debug + Send + Sync + 'static> Driver<M> {
                 job.kill();
             }
 
-            let args = compile.split(' ').collect_vec();
+            let args = compile.get().split(' ').collect_vec();
             let job =
                 self.hub
                     .exec_command(JobKind::Compilation, &self.cwd, meta, args[0], &args[1..]);
