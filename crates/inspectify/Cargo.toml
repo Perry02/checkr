@@ -32,6 +32,7 @@ mime_guess = "2.0.4"
 once_cell.workspace = true
 open = "5.0.1"
 rand.workspace = true
+roxmltree = "0.21.1"
 rusqlite.workspace = true
 rust-embed = { version = "8.3.0", features = ["axum", "compression"] }
 serde.workspace = true
