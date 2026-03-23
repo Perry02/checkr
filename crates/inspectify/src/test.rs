@@ -10,64 +10,40 @@ use tapi::{Tapi, endpoints::RouterExt};
 
 #[tokio::test]
 async fn test_thingy() {
+    // step 1. download coverlet: "dotnet tool install -g dotnet-coverage"
+    // step 2. run "dotnet publish -c Debug --output bin/run" in the f# projects root folder
+    // step 3. change @path_to_fsharp to point to the f# projects root folder
+    // step 4. change @test_amount to the amount of runs this should make
+    // step 5. run this test
+
     let hub: driver::Hub<InspectifyJobMeta> = driver::Hub::new().expect("");
 
     let path_to_fsharp = "../.././starters/fsharp-starter";
     let cwd = dunce::canonicalize(path_to_fsharp).expect("msg");
 
     let driver =
-        driver::Driver::new_from_path(hub.clone(), ".", "../.././starters/fsharp-starter/run.toml")
+        driver::Driver::new_from_path(hub.clone(), ".", path_to_fsharp.to_owned() + "/run.toml")
             .expect("");
 
     driver.ensure_compile(InspectifyJobMeta::default());
 
-    // for option in Analysis::options() {
-    //     println!("analysis: {option}");
-    // }
-
     let analysis = Analysis::from_str("Interpreter").expect("failure");
-
-    // dotnet tool install -g dotnet-coverage
 
     let test_amount = 5;
     let mut total_lines = 0;
 
-    for index in (1..test_amount + 1).rev() {
+    for index in 1..test_amount + 1 {
         print!("running seed {index}...");
 
         let input = analysis.gen_input_seeded(Some(index));
 
-        // let job = driver.exec_job(&input, InspectifyJobMeta::default());
-
-        // job.wait().await;
-
-        // let output = input.analysis().output_from_str(&job.stdout());
-
-        // if output.is_err() {
-        //     break;
-        // }
-
-        // let success = input.validate_output(&output.expect("")).expect("msg");
-
         let program = input.analysis().code().to_string();
-        let args = input.to_string();
+        let args = input.to_string().replace("\"", "\\\"");
 
-        // println!("cwd: {}", cwd.clone().to_str().expect("msg"));
-        // println!(
-        //     "driver: {}",
-        //     driver
-        //         .config()
-        //         .run()
-        //         .split(' ')
-        //         .map(|s| s.to_string())
-        //         .collect_vec()[0]
-        //         .as_str()
-        // );
-        // println!("program: {}", program);
-        // println!("args: {}", args);
+        //println!("args: {}", args);
 
         let job2 = hub.exec_command(
-            JobKind::Analysis(analysis.gen_input_seeded(Some(0)).clone()),
+            JobKind::Analysis(analysis.gen_input_seeded(Some(index)).clone()),
             cwd.clone(),
             InspectifyJobMeta::default(),
             "dotnet-coverage",
