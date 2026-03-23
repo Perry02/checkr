@@ -3,6 +3,7 @@ mod dot;
 use std::collections::{BTreeMap, BTreeSet};
 
 use ce_core::{Env, Generate, ValidationResult, define_env};
+use ce_core::gn::compiler_gen::{gen_commands, CompilerContext};
 use gcl::{
     ast::Commands,
     interpreter::InterpreterMemory,
@@ -105,7 +106,7 @@ impl Generate for Input {
             .unwrap();
 
         Input {
-            commands: Stringify::new(Commands::gn(&mut Default::default(), rng)),
+            commands: Stringify::new(gen_commands(&mut CompilerContext::default(), rng)),
             determinism,
         }
     }
@@ -153,4 +154,28 @@ enum ActionKind {
     Assignment(gcl::ast::Target<()>),
     Skip,
     Condition,
+}
+
+#[test]
+fn point4_oracle_memory_states() {
+    use gcl::ast::Commands;
+    use rand::SeedableRng;
+
+    let commands: Commands = "if a > 5 -> x := 1 [] a > 2 -> x := 0 fi"
+        .parse()
+        .unwrap();
+
+    let mut rng = rand::rngs::SmallRng::seed_from_u64(0xCEC34);
+    for i in 0..10 {
+        let mem = gcl::memory::Memory::from_targets_with(
+            commands.fv(),
+            &mut rng,
+            |rng, _| rng.random_range(-10..=10),
+            |rng, _| {
+                let len = rng.random_range(5..=10);
+                (0..len).map(|_| rng.random_range(-10..=10)).collect::<Vec<_>>()
+            },
+        );
+        println!("Sample {i}: {:?}", mem.variables);
+    }
 }
