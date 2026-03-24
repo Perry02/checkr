@@ -36,6 +36,7 @@ export class Io<A extends ce_shell.Analysis> {
   reference: Results<A> = $state(defaultResults());
 
   currentJob: { jobId: number; input: Input<A> } | null = $state(null);
+  rerunNonce = $state(0);
 
   results: Results<A> = $derived.by<Results<A>>(() => {
     if (!this.currentJob || !(this.currentJob.jobId in jobsStore.jobs))
@@ -78,6 +79,9 @@ export class Io<A extends ce_shell.Analysis> {
         return;
       }
 
+      // added this to access rerunNonce so manual reruns retrigger the effect
+      this.rerunNonce;
+
       if (showReference.show) {
         return;
       }
@@ -85,8 +89,8 @@ export class Io<A extends ce_shell.Analysis> {
       if (compilationStatus.status?.state != 'Succeeded') {
         return;
       }
-
-      const inputSnapshot = $state.snapshot(this.input);
+        // had to cast back to the concrete input in order for TS stops complaining
+      const inputSnapshot = $state.snapshot(this.input) as Input<A>;
 
       let cancel = () => {};
       let stop = false;
@@ -160,5 +164,10 @@ export class Io<A extends ce_shell.Analysis> {
     const result = await api.generate({ analysis: this.analysis, seed: seed ?? null }).data;
     this.input = result.json as any;
     return result.json as any;
+  }
+
+  rerun() {
+    if (!browser) return;
+    this.rerunNonce++;
   }
 }
