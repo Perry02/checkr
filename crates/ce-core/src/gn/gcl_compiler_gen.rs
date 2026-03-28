@@ -1,24 +1,8 @@
 /// Separate test-case generator for the compiler environment.
-///
-/// Unlike [`gcl_gen`], this generator enables:
-/// - **Arrays** — randomly generates `A[i]`, `B[i]`, `C[i]` targets
-/// - **`skip`** — emits `Command::Skip` at low probability
-/// - **Unary minus** — emits `AExpr::Minus(e)` at moderate probability
-///
-/// All generation is done via plain `gen_*` free functions rather than
-/// `Generate` trait impls, to avoid having duplicate trait impls on the same
-/// GCL AST types.
 use gcl::ast::{
     AExpr, AOp, Array, BExpr, Command, Commands, Guard, LogicOp, RelOp, Target, Variable,
 };
 use rand::{Rng, SeedableRng, rngs::SmallRng, seq::IndexedRandom};
-
-/// Internal concrete RNG type used for erased closure storage.
-///
-/// We use a concrete RNG type in closures so we can box them without hitting
-/// the dyn-incompatibility of `rand::Rng` (which has generic methods).
-/// Callers pass any `impl Rng`; we bridge via [`Ctx::sample`] which uses
-/// generics at the call boundary.
 type ErasedRng = SmallRng;
 
 type GenFn<G> = Box<dyn Fn(&mut CompilerContext, &mut ErasedRng) -> G>;
@@ -32,9 +16,7 @@ pub struct CompilerContext {
     pub no_division: bool,
     pub no_unary_minus: bool,
     pub no_arrays: bool,
-    /// Scalar variable names used as assignment targets / references.
     pub names: Vec<String>,
-    /// Array names used as array targets.
     pub array_names: Vec<String>,
 }
 
@@ -102,7 +84,6 @@ impl CompilerContext {
         (0..n).map(|_| f(self, rng)).collect()
     }
 
-    /// Like `many` but pinned to the internal `ErasedRng`, for use inside boxed closures.
     fn many_erased<G>(
         &mut self,
         min: usize,
@@ -113,26 +94,15 @@ impl CompilerContext {
         self.many(min, max, rng, f)
     }
 
-    /// Sample one of the provided options by weight.
-    ///
-    /// We work around `rand::Rng`'s dyn-incompatibility by accepting a concrete
-    /// `SmallRng` reference. The public `gen_*` functions accept any `R: Rng`
-    /// and forward a reseeded `SmallRng` here.
     fn sample<G>(&mut self, rng: &mut ErasedRng, options: GenOptions<G>) -> G {
         let f = options.choose_weighted(rng, |o| o.0).unwrap();
         f.1(self, rng)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Helper: bridge any Rng to the internal ErasedRng
-// ---------------------------------------------------------------------------
-
 fn bridge<R: Rng>(rng: &mut R) -> ErasedRng {
     SmallRng::seed_from_u64(rng.random())
 }
-
-// Scenario catalog to weigh random selections
 
 #[derive(Clone, Copy)]
 enum Scenario {
@@ -173,97 +143,104 @@ const CATALOG: &[(f32, Scenario)] = &[
     (3.0, Scenario::Random),
 ];
 
-// ---------------------------------------------------------------------------
-// Public generation entry points
-// ---------------------------------------------------------------------------
-
 pub fn gen_commands<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
-    let scenario = CATALOG.choose_weighted(rng, |item| item.0)
-                          .unwrap()
-                          .1;
+    let scenario = CATALOG.choose_weighted(rng, |item| item.0).unwrap().1;
     match scenario {
-        Scenario::Skip                        => gen_skip_program(cx, rng),
-        Scenario::SimpleIf                    => gen_simple_if(cx, rng),
-        Scenario::MultiGuardIf2               => gen_multi_guard_if(cx, rng, 2),
-        Scenario::MultiGuardIf3               => gen_multi_guard_if(cx, rng, 3),
-        Scenario::SimpleDo                    => gen_simple_do(cx, rng),
-        Scenario::DoNGuards2                  => gen_do_n_guards(cx, rng, 2),
-        Scenario::DoNGuards3                  => gen_do_n_guards(cx, rng, 3),
-        Scenario::DoNGuards4                  => gen_do_n_guards(cx, rng, 4),
-        Scenario::NestedIfInDo                => gen_nested_if_in_do(cx, rng),
-        Scenario::NestedDoInIf                => gen_nested_do_in_if(cx, rng),
-        Scenario::ArrayAssignment             => gen_array_assignment(cx, rng),
-        Scenario::ArrayRead                   => gen_array_read(cx, rng),
+        Scenario::Skip => gen_skip_program(cx, rng),
+        Scenario::SimpleIf => gen_simple_if(cx, rng),
+        Scenario::MultiGuardIf2 => gen_multi_guard_if(cx, rng, 2),
+        Scenario::MultiGuardIf3 => gen_multi_guard_if(cx, rng, 3),
+        Scenario::SimpleDo => gen_simple_do(cx, rng),
+        Scenario::DoNGuards2 => gen_do_n_guards(cx, rng, 2),
+        Scenario::DoNGuards3 => gen_do_n_guards(cx, rng, 3),
+        Scenario::DoNGuards4 => gen_do_n_guards(cx, rng, 4),
+        Scenario::NestedIfInDo => gen_nested_if_in_do(cx, rng),
+        Scenario::NestedDoInIf => gen_nested_do_in_if(cx, rng),
+        Scenario::ArrayAssignment => gen_array_assignment(cx, rng),
+        Scenario::ArrayRead => gen_array_read(cx, rng),
         Scenario::NonDeterministicOverlapping => gen_non_deterministic_overlapping(cx, rng),
-        Scenario::VariableReuse               => gen_variable_reuse(cx, rng),
-        Scenario::VariableAsIndex             => gen_variable_as_index(cx, rng),
-        Scenario::Random                      => gen_random_commands(cx, rng),
+        Scenario::VariableReuse => gen_variable_reuse(cx, rng),
+        Scenario::VariableAsIndex => gen_variable_as_index(cx, rng),
+        Scenario::Random => gen_random_commands(cx, rng),
     }
-    
 }
 
 fn gen_random_commands<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
     Commands(cx.many(1, 10, rng, gen_command))
 }
 
-
-fn gen_skip_program<R: Rng>(cx: &mut CompilerContext, rng:
-&mut R) -> Commands {
+fn gen_skip_program<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
     let mut cmds: Vec<Command> = Vec::new();
     if rng.random_bool(0.5) {
-    cmds.push(Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng)));
+        cmds.push(Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng)));
     }
     cmds.push(Command::Skip);
     if rng.random_bool(0.3) {
-    cmds.push(Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng)));
+        cmds.push(Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng)));
     }
     Commands(cmds)
 }
 
-fn gen_simple_if<R: Rng>(cx: &mut CompilerContext, rng: &mut
-R) -> Commands {
-    let body = Commands(vec![Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng)),]);
+fn gen_simple_if<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
+    let body = Commands(vec![Command::Assignment(
+        gen_target(cx, rng),
+        gen_aexpr(cx, rng),
+    )]);
     let guard = Guard(gen_bexpr(cx, rng), body);
     Commands(vec![Command::If(vec![guard])])
 }
 
-fn gen_multi_guard_if<R: Rng>(cx: &mut CompilerContext, rng:
-&mut R, n: usize) -> Commands {
-    let guards: Vec<Guard> = (0..n).map(|_| {
-        let body = Commands(vec![Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng)),]);
-        Guard(gen_bexpr(cx, rng), body)
-    }).collect();
+fn gen_multi_guard_if<R: Rng>(cx: &mut CompilerContext, rng: &mut R, n: usize) -> Commands {
+    let guards: Vec<Guard> = (0..n)
+        .map(|_| {
+            let body = Commands(vec![Command::Assignment(
+                gen_target(cx, rng),
+                gen_aexpr(cx, rng),
+            )]);
+            Guard(gen_bexpr(cx, rng), body)
+        })
+        .collect();
     Commands(vec![Command::If(guards)])
 }
 
-fn gen_simple_do<R: Rng>(cx: &mut CompilerContext, rng: &mut
-R) -> Commands {
-    let body = Commands(vec![Command::Assignment(gen_target(cx, rng), gen_aexpr(cx,rng)),]);
+fn gen_simple_do<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
+    let body = Commands(vec![Command::Assignment(
+        gen_target(cx, rng),
+        gen_aexpr(cx, rng),
+    )]);
     let guard = Guard(gen_bexpr(cx, rng), body);
     Commands(vec![Command::Loop(vec![guard])])
 }
-fn gen_do_n_guards<R: Rng>(cx: &mut CompilerContext, rng:
-&mut R, n: usize) -> Commands {
-    let guards: Vec<Guard> = (0..n).map(|_| {
-        let body = Commands(vec![Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng)),]);
-        Guard(gen_bexpr(cx, rng), body)
-    }).collect();
+fn gen_do_n_guards<R: Rng>(cx: &mut CompilerContext, rng: &mut R, n: usize) -> Commands {
+    let guards: Vec<Guard> = (0..n)
+        .map(|_| {
+            let body = Commands(vec![Command::Assignment(
+                gen_target(cx, rng),
+                gen_aexpr(cx, rng),
+            )]);
+            Guard(gen_bexpr(cx, rng), body)
+        })
+        .collect();
     Commands(vec![Command::Loop(guards)])
 }
 
-fn gen_nested_if_in_do<R: Rng>(cx: &mut CompilerContext,
-rng: &mut R) -> Commands {
-    let inner_body = Commands(vec![Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng)),]);
+fn gen_nested_if_in_do<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
+    let inner_body = Commands(vec![Command::Assignment(
+        gen_target(cx, rng),
+        gen_aexpr(cx, rng),
+    )]);
     let inner_guard = Guard(gen_bexpr(cx, rng), inner_body);
     let inner_if = Command::If(vec![inner_guard]);
     let outer_body = Commands(vec![inner_if]);
-    let outer_guard = Guard(gen_bexpr(cx,rng), outer_body);
+    let outer_guard = Guard(gen_bexpr(cx, rng), outer_body);
     Commands(vec![Command::Loop(vec![outer_guard])])
 }
 
-fn gen_nested_do_in_if<R: Rng>(cx: &mut CompilerContext,
-rng: &mut R) -> Commands {
-    let inner_body = Commands(vec![Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng)),]);
+fn gen_nested_do_in_if<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
+    let inner_body = Commands(vec![Command::Assignment(
+        gen_target(cx, rng),
+        gen_aexpr(cx, rng),
+    )]);
     let inner_guard = Guard(gen_bexpr(cx, rng), inner_body);
     let inner_do = Command::Loop(vec![inner_guard]);
     let outer_body = Commands(vec![inner_do]);
@@ -271,18 +248,24 @@ rng: &mut R) -> Commands {
     Commands(vec![Command::If(vec![outer_guard])])
 }
 
-fn gen_array_assignment<R: Rng>(cx: &mut CompilerContext,
-rng: &mut R) -> Commands {
-    let arr_name = cx.array_names.choose(rng).cloned().unwrap_or_else(|| "A".into());
+fn gen_array_assignment<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
+    let arr_name = cx
+        .array_names
+        .choose(rng)
+        .cloned()
+        .unwrap_or_else(|| "A".into());
     let idx = gen_aexpr(cx, rng);
-    let rhs = gen_aexpr(cx,rng);
-    let guaranteed = Command::Assignment(Target::Array(Array(arr_name), Box::new(idx)), rhs,);
+    let rhs = gen_aexpr(cx, rng);
+    let guaranteed = Command::Assignment(Target::Array(Array(arr_name), Box::new(idx)), rhs);
     Commands(vec![guaranteed])
 }
 
-fn gen_array_read<R: Rng>(cx: &mut CompilerContext, rng:
-&mut R) -> Commands {
-    let arr_name = cx.array_names.choose(rng).cloned().unwrap_or_else(|| "A".into());
+fn gen_array_read<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
+    let arr_name = cx
+        .array_names
+        .choose(rng)
+        .cloned()
+        .unwrap_or_else(|| "A".into());
     let idx = gen_aexpr(cx, rng);
     let rhs = AExpr::Reference(Target::Array(Array(arr_name), Box::new(idx)));
     let scalar_var = cx.names.choose(rng).cloned().unwrap_or_else(|| "x".into());
@@ -290,33 +273,60 @@ fn gen_array_read<R: Rng>(cx: &mut CompilerContext, rng:
     Commands(vec![guaranteed])
 }
 
-fn gen_non_deterministic_overlapping<R: Rng>(cx: &mut
-CompilerContext, rng: &mut R) -> Commands {
+fn gen_non_deterministic_overlapping<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
     let var_name = cx.names.choose(rng).cloned().unwrap_or_else(|| "a".into());
     let var_ref = AExpr::Reference(Target::Variable(Variable(var_name)));
     let b1 = BExpr::Rel(var_ref.clone(), RelOp::Gt, AExpr::Number(0));
     let b2 = BExpr::Rel(var_ref.clone(), RelOp::Lt, AExpr::Number(10));
-    let g1 = Guard(b1, Commands(vec![Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng))]));
-    let g2 = Guard(b2, Commands(vec![Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng))]));
+    let g1 = Guard(
+        b1,
+        Commands(vec![Command::Assignment(
+            gen_target(cx, rng),
+            gen_aexpr(cx, rng),
+        )]),
+    );
+    let g2 = Guard(
+        b2,
+        Commands(vec![Command::Assignment(
+            gen_target(cx, rng),
+            gen_aexpr(cx, rng),
+        )]),
+    );
     Commands(vec![Command::If(vec![g1, g2])])
 }
 
-fn gen_variable_reuse<R: Rng>(cx: &mut CompilerContext, rng:
-&mut R) -> Commands {
+fn gen_variable_reuse<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
     let var_name = cx.names.choose(rng).cloned().unwrap_or_else(|| "a".into());
     let make_target = || Target::Variable(Variable(var_name.clone()));
-    let g1 = Guard(gen_bexpr(cx, rng), Commands(vec![Command::Assignment(make_target(), gen_aexpr(cx, rng))]));
-    let g2 = Guard(gen_bexpr(cx, rng), Commands(vec![Command::Assignment(make_target(), gen_aexpr(cx, rng))]));
+    let g1 = Guard(
+        gen_bexpr(cx, rng),
+        Commands(vec![Command::Assignment(make_target(), gen_aexpr(cx, rng))]),
+    );
+    let g2 = Guard(
+        gen_bexpr(cx, rng),
+        Commands(vec![Command::Assignment(make_target(), gen_aexpr(cx, rng))]),
+    );
     Commands(vec![Command::If(vec![g1, g2])])
 }
 
-fn gen_variable_as_index<R: Rng>(cx: &mut CompilerContext,
-rng: &mut R) -> Commands {
-    let var_name = cx.array_names.choose(rng).cloned().unwrap_or_else(|| "a".into());
-    let arr_name = cx.array_names.choose(rng).cloned().unwrap_or_else(|| "A".into());
+fn gen_variable_as_index<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
+    let var_name = cx
+        .array_names
+        .choose(rng)
+        .cloned()
+        .unwrap_or_else(|| "a".into());
+    let arr_name = cx
+        .array_names
+        .choose(rng)
+        .cloned()
+        .unwrap_or_else(|| "A".into());
     let idx = AExpr::Reference(Target::Variable(Variable(var_name.clone())));
-    let arr_ass = Command::Assignment(Target::Array(Array(arr_name), Box::new(idx)), gen_aexpr(cx,rng),);
-    let scalar_assign = Command::Assignment(Target::Variable(Variable(var_name)), gen_aexpr(cx,rng),);
+    let arr_ass = Command::Assignment(
+        Target::Array(Array(arr_name), Box::new(idx)),
+        gen_aexpr(cx, rng),
+    );
+    let scalar_assign =
+        Command::Assignment(Target::Variable(Variable(var_name)), gen_aexpr(cx, rng));
 
     Commands(vec![arr_ass, scalar_assign])
 }
@@ -334,7 +344,6 @@ pub fn gen_command<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Command {
                     Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng))
                 }),
             ),
-            // skip is a real compiler edge — include it at a low weight
             (
                 0.3,
                 Box::new(|_cx: &mut CompilerContext, _rng: &mut ErasedRng| Command::Skip),
@@ -397,7 +406,6 @@ pub fn gen_aexpr<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> AExpr {
                     AExpr::binary(gen_aexpr(cx, rng), gen_aop(cx, rng), gen_aexpr(cx, rng))
                 }),
             ),
-            // Unary minus: -expr
             (
                 if cx.no_unary_minus || cx.recursion_limit == 0 || cx.fuel == 0 {
                     0.0
@@ -464,11 +472,7 @@ pub fn gen_bexpr<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> BExpr {
                 if cx.recursion_limit == 0 { 0.0 } else { 0.7 },
                 Box::new(|cx: &mut CompilerContext, rng: &mut ErasedRng| {
                     cx.recursion_limit = cx.recursion_limit.checked_sub(1).unwrap_or_default();
-                    BExpr::logic(
-                        gen_bexpr(cx, rng),
-                        gen_logicop(cx, rng),
-                        gen_bexpr(cx, rng),
-                    )
+                    BExpr::logic(gen_bexpr(cx, rng), gen_logicop(cx, rng), gen_bexpr(cx, rng))
                 }),
             ),
             (
@@ -539,19 +543,12 @@ pub fn gen_logicop<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> LogicOp {
         ],
     )
 }
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-/// Erased-RNG version of gen_command for use inside `many`.
 fn gen_command_erased(cx: &mut CompilerContext, rng: &mut ErasedRng) -> Command {
     gen_command(cx, rng)
 }
 
-fn gen_guard_erased(cx: &mut CompilerContext, rng: &mut
-  ErasedRng) -> Guard {
-      gen_guard(cx, rng)
+fn gen_guard_erased(cx: &mut CompilerContext, rng: &mut ErasedRng) -> Guard {
+    gen_guard(cx, rng)
 }
 
 fn gen_reference<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Target<Box<AExpr>> {
@@ -596,9 +593,12 @@ pub fn collect_guards(cmds: &Commands) -> Vec<BExpr> {
     result
 }
 
-pub fn generate_witness_memories<R: Rng>(commands: &Commands, rng: &mut R) -> Vec<gcl::interpreter::InterpreterMemory> {
-    use gcl::memory::Memory;
+pub fn generate_witness_memories<R: Rng>(
+    commands: &Commands,
+    rng: &mut R,
+) -> Vec<gcl::interpreter::InterpreterMemory> {
     use gcl::interpreter::InterpreterMemory;
+    use gcl::memory::Memory;
 
     let guards = collect_guards(commands);
     let fv = commands.fv();
@@ -613,7 +613,8 @@ pub fn generate_witness_memories<R: Rng>(commands: &Commands, rng: &mut R) -> Ve
                 break;
             }
             let mem = Memory::from_targets_with(
-                fv.clone(), &mut *rng,
+                fv.clone(),
+                &mut *rng,
                 |rng, _| rng.random_range(-10..=10),
                 |rng, _| {
                     let len = rng.random_range(5..=10);
@@ -640,4 +641,3 @@ pub fn generate_witness_memories<R: Rng>(commands: &Commands, rng: &mut R) -> Ve
 
     witnesses
 }
-
