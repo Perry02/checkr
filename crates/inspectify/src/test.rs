@@ -90,8 +90,10 @@ async fn test_thingy() {
         //println!("{}", &job2.stdout());
     }
 
+    let percent = (test_amount as f64 / total_lines as f64) * 100.0;
+
     println!(
-        "Finished {test_amount} runs and hit a total of {total_lines} lines with an average of {} lines",
+        "Finished {test_amount} runs and hit a total of {total_lines} lines with an average of {} lines, or {percent}",
         total_lines / test_amount
     );
 
