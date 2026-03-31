@@ -3,6 +3,7 @@ mod dot;
 use std::collections::{BTreeMap, BTreeSet};
 
 use ce_core::{Env, Generate, ValidationResult, define_env};
+use ce_core::gn::compiler_gen::{gen_commands, generate_witness_memories, CompilerContext};
 use gcl::{
     ast::Commands,
     interpreter::InterpreterMemory,
@@ -12,6 +13,7 @@ use itertools::Itertools;
 use rand::{Rng, seq::IndexedRandom};
 use serde::{Deserialize, Serialize};
 use stdx::stringify::Stringify;
+use petgraph::visit::EdgeRef;
 
 define_env!(CompilerEnv);
 
@@ -20,6 +22,8 @@ define_env!(CompilerEnv);
 pub struct Input {
     pub commands: Stringify<Commands>,
     pub determinism: Determinism,
+    #[serde(default)]
+    pub witness_mems: Vec<InterpreterMemory>,
 }
 
 #[derive(tapi::Tapi, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -57,24 +61,25 @@ impl Env for CompilerEnv {
                 ))?;
         let o_dot = ProgramGraph::new(input.determinism, &commands).dot();
 
-        let mut rng = <rand::rngs::SmallRng as rand::SeedableRng>::seed_from_u64(0xCEC34);
-        let sample_mems = (0..10)
-            .map(|_| {
-                let initial_memory = gcl::memory::Memory::from_targets_with(
-                    commands.fv(),
-                    &mut rng,
-                    |rng, _| rng.random_range(-10..=10),
-                    |rng, _| {
-                        let len = rng.random_range(5..=10);
-                        (0..len).map(|_| rng.random_range(-10..=10)).collect()
-                    },
-                );
-                InterpreterMemory {
-                    variables: initial_memory.variables,
-                    arrays: initial_memory.arrays,
-                }
-            })
-            .collect_vec();
+        let sample_mems = 
+        if input.witness_mems.is_empty() {
+            let mut rng = <rand::rngs::SmallRng as rand::SeedableRng>::seed_from_u64(0xCEC34); 
+            (0..10).map(|_| {
+                    let initial_memory = gcl::memory::Memory::from_targets_with(
+                        commands.fv(), &mut rng, |rng, _| rng.random_range(-10..=10),|rng, _| {
+                            let len = rng.random_range(5..=10);
+                            (0..len).map(|_| rng.random_range(-10..=10)).collect()
+                        },
+                    );
+                    InterpreterMemory {
+                        variables: initial_memory.variables,
+                        arrays: initial_memory.arrays,
+                    }
+                })
+                .collect_vec()
+        } else {
+            input.witness_mems.clone()
+        };
 
         let t_g = match dot::dot_to_petgraph(&output.dot) {
             Ok(t_g) => t_g,
@@ -86,12 +91,21 @@ impl Env for CompilerEnv {
         };
         let o_g = dot::dot_to_petgraph(&o_dot).expect("we always produce valid dot");
 
-        if action_bag(&o_g, &sample_mems) != action_bag(&t_g, &sample_mems) {
-            Ok(ValidationResult::Mismatch {
+        if action_bag(&o_g, &sample_mems) != action_bag(&t_g, &sample_mems)
+        {
+            return Ok(ValidationResult::Mismatch {
                 reason: "the graphs have different structure".to_string(),
-            })
-        } else {
-            Ok(ValidationResult::Correct)
+            });
+        }
+
+        // Path fingerprint check — catches structural difference action_bag misses
+        match (path_fingerprints(&o_g), path_fingerprints(&t_g)) {
+            (Some(o_paths), Some(t_paths)) if o_paths != t_paths => {
+                Ok(ValidationResult::Mismatch {
+                    reason: "path fingerprints differ — graph structure mismatch".to_string(),
+                })
+            }
+            _ => Ok(ValidationResult::Correct),
         }
     }
 }
@@ -100,14 +114,17 @@ impl Generate for Input {
     type Context = ();
 
     fn gn<R: ce_core::rand::Rng>(_cx: &mut Self::Context, rng: &mut R) -> Self {
-        let determinism = *[Determinism::Deterministic, Determinism::NonDeterministic]
-            .choose(rng)
-            .unwrap();
-
-        Input {
-            commands: Stringify::new(Commands::gn(&mut Default::default(), rng)),
-            determinism,
-        }
+      let determinism = *[Determinism::Deterministic, Determinism::NonDeterministic]
+        .choose(rng)
+        .unwrap();
+      let commands = gen_commands(&mut CompilerContext::default(), rng);
+      let mut w_rng = <rand::rngs::SmallRng as rand::SeedableRng>::seed_from_u64(0xCEC34);
+      let witness_mems = generate_witness_memories(&commands, &mut w_rng);
+      Input {
+          commands: Stringify::new(commands),
+          determinism,
+          witness_mems,
+      }
     }
 }
 
@@ -128,6 +145,35 @@ fn action_bag(
     }
 
     counts
+}
+
+const MAX_PATHS: usize = 512;
+
+fn path_fingerprints(g: &dot::ParsedGraph) -> Option<BTreeSet<Vec<String>>> {
+    let start = g.node_mapping.get("qStart")?;
+    let mut all_paths = BTreeSet::new();
+    let mut stack: Vec<(petgraph::graph::NodeIndex, Vec<String>, BTreeSet<petgraph::graph::NodeIndex>)> = vec![ (*start, vec![], BTreeSet::new()),];
+    while let Some((node, path, visited)) = stack.pop() {
+        if all_paths.len() >= MAX_PATHS {
+            return None;
+        }
+        let outgoing: Vec<_> = g.graph.edges(node).collect();
+        if outgoing.is_empty() {
+            all_paths.insert(path);
+        } else {
+            for edge in outgoing {
+                let target = edge.target();
+                if !visited.contains(&target) {
+                    let mut new_path = path.clone();
+                    new_path.push(edge.weight().to_string());
+                    let mut new_visited = visited.clone();
+                    new_visited.insert(node);
+                    stack.push((target, new_path, new_visited));
+                }
+            }
+        }
+    }
+    Some(all_paths)
 }
 
 type Fingerprint = (ActionKind, Vec<Option<InterpreterMemory>>);
@@ -153,4 +199,116 @@ enum ActionKind {
     Assignment(gcl::ast::Target<()>),
     Skip,
     Condition,
+}
+
+#[test]
+fn point4_oracle_memory_states() {
+    use gcl::ast::Commands;
+    use rand::SeedableRng;
+
+    let commands: Commands = "if a > 5 -> x := 1 [] a > 2 -> x := 0 fi"
+        .parse()
+        .unwrap();
+
+    let mut rng = rand::rngs::SmallRng::seed_from_u64(0xCEC34);
+    for i in 0..10 {
+        let mem = gcl::memory::Memory::from_targets_with(
+            commands.fv(),
+            &mut rng,
+            |rng, _| rng.random_range(-10..=10),
+            |rng, _| {
+                let len = rng.random_range(5..=10);
+                (0..len).map(|_| rng.random_range(-10..=10)).collect::<Vec<_>>()
+            },
+        );
+        println!("Sample {i}: {:?}", mem.variables);
+    }
+}
+
+#[test]
+fn witness_memories_cover_guards() {
+    use rand::SeedableRng;
+    use ce_core::gn::compiler_gen::{collect_guards, generate_witness_memories, CompilerContext, gen_commands};
+
+    let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
+    for _ in 0..20 {
+        let mut cx = CompilerContext::default();
+        cx.set_no_arrays(true);
+        let commands = gen_commands(&mut cx, &mut rng);
+        let guards = collect_guards(&commands);
+        let witnesses = generate_witness_memories(&commands, &mut rng);
+
+        for guard in &guards {
+            match guard {
+                gcl::ast::BExpr::Bool(_) => continue,
+                _ => {
+                    let any_evaluates = witnesses.iter().any(|mem| {
+                        guard.semantics(mem).is_ok()
+                    });
+                    assert!(any_evaluates, "No witness evaluates guard: {:?}", guard);
+                }
+            }
+        }
+    }
+  }
+
+#[test]
+fn validate_uses_witness_mems_not_fixed_seed() {
+    use rand::SeedableRng;
+    use ce_core::{Env, Generate};
+
+    let mut rng = rand::rngs::SmallRng::seed_from_u64(99);
+    let input = Input::gn(&mut (), &mut rng);
+
+    assert!(!input.witness_mems.is_empty(), "Generated input should have witness memories");
+
+    let output = CompilerEnv::run(&input).unwrap();
+    let result = CompilerEnv::validate(&input, &output).unwrap();
+    assert_eq!(result, ce_core::ValidationResult::Correct);
+}
+
+#[test]
+  fn path_fingerprints_differ_for_det_vs_nondet() {
+    use gcl::ast::Commands;
+    use gcl::pg::{Determinism, ProgramGraph};
+
+    let commands: Commands = "if a > 0 -> x := 1 [] a < 10 -> x := 2 fi"
+    .parse()
+    .unwrap();
+
+    let det_dot = ProgramGraph::new(Determinism::Deterministic, &commands).dot();
+    let nondet_dot = ProgramGraph::new(Determinism::NonDeterministic, &commands).dot();
+
+    let det_g = dot::dot_to_petgraph(&det_dot).unwrap();
+    let nondet_g = dot::dot_to_petgraph(&nondet_dot).unwrap();
+
+    let det_paths = path_fingerprints(&det_g);
+    let nondet_paths = path_fingerprints(&nondet_g);
+
+    assert!(det_paths.is_some(), "det graph should have qStart and paths");
+    assert!(nondet_paths.is_some(), "nondet graph should have qStart and paths");
+    assert_ne!(
+        det_paths.unwrap(),
+        nondet_paths.unwrap(),
+        "Path fingerprints should differ between det and nondet compilation of overlapping guards"
+    );
+  }
+
+  #[test]
+  fn path_fingerprints_match_for_correct_graph() {
+    use rand::SeedableRng;
+    use ce_core::{Env, Generate};
+
+    let mut rng = rand::rngs::SmallRng::seed_from_u64(123);
+    for _ in 0..10 {
+        let input = Input::gn(&mut (), &mut rng);
+        let output = CompilerEnv::run(&input).unwrap();
+        let result = CompilerEnv::validate(&input, &output).unwrap();
+        assert_eq!(
+            result,
+            ce_core::ValidationResult::Correct,
+            "Reference output should validate as correct. Commands: {:?}",
+            input.commands
+        );
+    }
 }
