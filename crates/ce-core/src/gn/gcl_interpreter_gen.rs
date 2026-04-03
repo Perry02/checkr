@@ -49,26 +49,34 @@ pub fn generate_selective<R: Rng>(cx: &mut InterpreterContext, rng: &mut R) -> C
 
     if cx.level <= 1 {
         // ? 1 Assignment: state updates (single assignments)
-        let mut erng = SmallRng::seed_from_u64(rng.random());
-        cmds.push(
-            lvl_assignment(&mut cx.compiler_context).generate(&mut cx.compiler_context, &mut erng),
-        );
 
         // return the command immediately if it is level 1,
         // as the generator will normally always generate a sequence of at least 3 commands
         if cx.level == 1 {
+            let mut erng = SmallRng::seed_from_u64(rng.random());
+            cmds.append(
+                &mut lvl_assignment(&mut cx.compiler_context)
+                    .generate(&mut cx.compiler_context, &mut erng)
+                    .0,
+            );
             return Commands(cmds);
         }
+
+        generation_options
+            .0
+            .append(&mut lvl_assignment(&mut cx.compiler_context).0);
     }
 
     if cx.level >= 2 {
         // ? 2 Sequencing: multiple steps ( sequential composition C1 ; C2, always deterministic, no branching, Should always be common afterwards)
-        let mut erng = SmallRng::seed_from_u64(rng.random());
-        cmds.append(
-            &mut lvl_sequencing(&mut cx.compiler_context)
-                .generate(&mut cx.compiler_context, &mut erng)
-                .0,
-        );
+        if cx.level == 2 {
+            let mut erng = SmallRng::seed_from_u64(rng.random());
+            cmds.append(
+                &mut lvl_sequencing(&mut cx.compiler_context)
+                    .generate(&mut cx.compiler_context, &mut erng)
+                    .0,
+            );
+        }
 
         generation_options
             .0
@@ -77,27 +85,31 @@ pub fn generate_selective<R: Rng>(cx: &mut InterpreterContext, rng: &mut R) -> C
 
     if cx.level >= 3 {
         // ? 3 Conditionals: bool branching, execution depends on guards being true, always deterministic. For example: if b1 → C1 [] ... [] bn → Cn fi
-        let mut erng = SmallRng::seed_from_u64(rng.random());
-        cmds.append(
-            &mut lvl_conditionals()
-                .generate(&mut cx.compiler_context, &mut erng)
-                .0,
-        );
+        if cx.level == 3 {
+            let mut erng = SmallRng::seed_from_u64(rng.random());
+            cmds.append(
+                &mut lvl_conditionals()
+                    .generate(&mut cx.compiler_context, &mut erng)
+                    .0,
+            );
+        }
 
         generation_options.0.append(&mut lvl_conditionals().0);
     }
 
     if cx.level >= 4 {
         // ? 4 Stuck: unsolvable programs, guards are all false, or semantics undefined like division by zero
-        // as this is before loops they have to be disabled
-        cx.compiler_context.no_loops = false;
+        if cx.level == 4 {
+            // as this is before loops they have to be disabled
+            cx.compiler_context.no_loops = false;
 
-        let mut erng = SmallRng::seed_from_u64(rng.random());
-        cmds.append(
-            &mut lvl_stuck(&mut cx.compiler_context)
-                .generate(&mut cx.compiler_context, &mut erng)
-                .0,
-        );
+            let mut erng = SmallRng::seed_from_u64(rng.random());
+            cmds.append(
+                &mut lvl_stuck(&mut cx.compiler_context)
+                    .generate(&mut cx.compiler_context, &mut erng)
+                    .0,
+            );
+        }
 
         generation_options
             .0
@@ -106,12 +118,14 @@ pub fn generate_selective<R: Rng>(cx: &mut InterpreterContext, rng: &mut R) -> C
 
     if cx.level >= 5 {
         // ? 5 Loops: long execution (execution that may surpass the trace length limit) do GC od introduces iteration, exits when no guards hold. This level will bring potentially infinite execution, and differences between terminated, running, stuck( we have in the code exactly as TerminationState::Running TerminationState::Terminated TerminationState::Stuck
-        let mut erng = SmallRng::seed_from_u64(rng.random());
-        cmds.append(
-            &mut lvl_loops(&mut cx.compiler_context)
-                .generate(&mut cx.compiler_context, &mut erng)
-                .0,
-        );
+        if cx.level == 5 {
+            let mut erng = SmallRng::seed_from_u64(rng.random());
+            cmds.append(
+                &mut lvl_loops(&mut cx.compiler_context)
+                    .generate(&mut cx.compiler_context, &mut erng)
+                    .0,
+            );
+        }
 
         generation_options
             .0
@@ -120,12 +134,14 @@ pub fn generate_selective<R: Rng>(cx: &mut InterpreterContext, rng: &mut R) -> C
 
     if cx.level >= 6 {
         // ? 6 Nondeterminism: multiple valid paths, overlapping guards in if / do (we have also implemented the new nondeterministic path for this one: nexts() choose_random(...)
-        let mut erng = SmallRng::seed_from_u64(rng.random());
-        cmds.append(
-            &mut lvl_nondeterminism(&mut cx.compiler_context)
-                .generate(&mut cx.compiler_context, &mut erng)
-                .0,
-        );
+        if cx.level == 6 {
+            let mut erng = SmallRng::seed_from_u64(rng.random());
+            cmds.append(
+                &mut lvl_nondeterminism(&mut cx.compiler_context)
+                    .generate(&mut cx.compiler_context, &mut erng)
+                    .0,
+            );
+        }
 
         generation_options
             .0
@@ -134,12 +150,14 @@ pub fn generate_selective<R: Rng>(cx: &mut InterpreterContext, rng: &mut R) -> C
 
     if cx.level >= 7 {
         // ? 7 Undefined semantics:
-        let mut erng = SmallRng::seed_from_u64(rng.random());
-        cmds.append(
-            &mut lvl_undefined(&mut cx.compiler_context)
-                .generate(&mut cx.compiler_context, &mut erng)
-                .0,
-        );
+        if cx.level == 7 {
+            let mut erng = SmallRng::seed_from_u64(rng.random());
+            cmds.append(
+                &mut lvl_undefined(&mut cx.compiler_context)
+                    .generate(&mut cx.compiler_context, &mut erng)
+                    .0,
+            );
+        }
 
         generation_options
             .0
@@ -148,40 +166,44 @@ pub fn generate_selective<R: Rng>(cx: &mut InterpreterContext, rng: &mut R) -> C
 
     if cx.level >= 8 {
         // ? 8 Composition: (all previous levels are guaranteed here)
-        let mut erng = SmallRng::seed_from_u64(rng.random());
-        cmds.push(
-            lvl_assignment(&mut cx.compiler_context).generate(&mut cx.compiler_context, &mut erng),
-        );
-        cmds.append(
-            &mut lvl_sequencing(&mut cx.compiler_context)
-                .generate(&mut cx.compiler_context, &mut erng)
-                .0,
-        );
-        cmds.append(
-            &mut lvl_conditionals()
-                .generate(&mut cx.compiler_context, &mut erng)
-                .0,
-        );
-        cmds.append(
-            &mut lvl_stuck(&mut cx.compiler_context)
-                .generate(&mut cx.compiler_context, &mut erng)
-                .0,
-        );
-        cmds.append(
-            &mut lvl_loops(&mut cx.compiler_context)
-                .generate(&mut cx.compiler_context, &mut erng)
-                .0,
-        );
-        cmds.append(
-            &mut lvl_nondeterminism(&mut cx.compiler_context)
-                .generate(&mut cx.compiler_context, &mut erng)
-                .0,
-        );
-        cmds.append(
-            &mut lvl_undefined(&mut cx.compiler_context)
-                .generate(&mut cx.compiler_context, &mut erng)
-                .0,
-        );
+        if cx.level == 8 {
+            let mut erng = SmallRng::seed_from_u64(rng.random());
+            cmds.append(
+                &mut lvl_assignment(&mut cx.compiler_context)
+                    .generate(&mut cx.compiler_context, &mut erng)
+                    .0,
+            );
+            cmds.append(
+                &mut lvl_sequencing(&mut cx.compiler_context)
+                    .generate(&mut cx.compiler_context, &mut erng)
+                    .0,
+            );
+            cmds.append(
+                &mut lvl_conditionals()
+                    .generate(&mut cx.compiler_context, &mut erng)
+                    .0,
+            );
+            cmds.append(
+                &mut lvl_stuck(&mut cx.compiler_context)
+                    .generate(&mut cx.compiler_context, &mut erng)
+                    .0,
+            );
+            cmds.append(
+                &mut lvl_loops(&mut cx.compiler_context)
+                    .generate(&mut cx.compiler_context, &mut erng)
+                    .0,
+            );
+            cmds.append(
+                &mut lvl_nondeterminism(&mut cx.compiler_context)
+                    .generate(&mut cx.compiler_context, &mut erng)
+                    .0,
+            );
+            cmds.append(
+                &mut lvl_undefined(&mut cx.compiler_context)
+                    .generate(&mut cx.compiler_context, &mut erng)
+                    .0,
+            );
+        }
 
         //generation_options.0.append(&mut lvl_composition().0);
     }
@@ -211,7 +233,7 @@ pub fn generate_selective<R: Rng>(cx: &mut InterpreterContext, rng: &mut R) -> C
 }
 
 // ? 1 Assignment: state updates (single assignments)
-fn lvl_assignment(cx: &mut CompilerContext) -> GenOptionsNested<Command> {
+fn lvl_assignment(cx: &mut CompilerContext) -> GenOptionsNested<Commands> {
     // as these commands are essentially the stopping points for the generator,
     // we modify the change for them to generate depending on the current fuel of the generation
     let point_of_no_return: Box<dyn Fn(&mut CompilerContext) -> f32> =
@@ -233,7 +255,9 @@ fn lvl_assignment(cx: &mut CompilerContext) -> GenOptionsNested<Command> {
             Box::new(
                 |cx: &mut CompilerContext,
                  rng: &mut ErasedRng,
-                 _gnopt: &GenOptionsNested<Command>| gen_assignment(cx, rng),
+                 _gnopt: &GenOptionsNested<Commands>| {
+                    Commands(vec![gen_assignment(cx, rng)])
+                },
             ),
         ),
         (
@@ -241,7 +265,7 @@ fn lvl_assignment(cx: &mut CompilerContext) -> GenOptionsNested<Command> {
             Box::new(
                 |_cx: &mut CompilerContext,
                  _rng: &mut ErasedRng,
-                 _gnopt: &GenOptionsNested<Command>| Command::Skip,
+                 _gnopt: &GenOptionsNested<Commands>| Commands(vec![Command::Skip]),
             ),
         ),
     ])
