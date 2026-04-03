@@ -104,7 +104,8 @@ export namespace Calculator {
 export namespace Compiler {
   export type Input = {
     commands: string,
-    determinism: GCL.Determinism
+    determinism: GCL.Determinism,
+    witness_mems: Interpreter.InterpreterMemory[]
   };
   export type Output = {
     dot: string
@@ -336,6 +337,11 @@ export namespace inspectify {
     }
   }
   export namespace endpoints {
+    export type ReferenceExecution = {
+      meta: ce_shell.io.Meta,
+      output: (ce_shell.io.Output | null),
+      error: (string | null)
+    };
     export type Event =
       | { "type": "Reset" }
       | { "type": "CompilationStatus", "value": { status: inspectify.endpoints.CompilationStatus } }
@@ -343,17 +349,12 @@ export namespace inspectify {
       | { "type": "JobsChanged", "value": { jobs: driver.job.JobId[] } }
       | { "type": "GroupsConfig", "value": { config: inspectify.checko.config.GroupsConfig } }
       | { "type": "ProgramsConfig", "value": { programs: inspectify.endpoints.Program[] } };
-    export type GenerateParams = {
-      analysis: ce_shell.Analysis,
-      seed: (number | null)
-    };
     export type PublicEvent =
       | { "type": "Reset" }
       | { "type": "StateChanged", "value": inspectify.checko.scoreboard.PublicState };
-    export type ReferenceExecution = {
-      meta: ce_shell.io.Meta,
-      output: (ce_shell.io.Output | null),
-      error: (string | null)
+    export type GenerateParams = {
+      analysis: ce_shell.Analysis,
+      seed: (number | null)
     };
     export type AnalysisExecution = {
       id: driver.job.JobId
