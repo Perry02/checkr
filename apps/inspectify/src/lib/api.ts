@@ -104,7 +104,8 @@ export namespace Calculator {
 export namespace Compiler {
   export type Input = {
     commands: string,
-    determinism: GCL.Determinism
+    determinism: GCL.Determinism,
+    witness_mems: Interpreter.InterpreterMemory[]
   };
   export type Output = {
     dot: string

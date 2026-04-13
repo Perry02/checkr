@@ -36,9 +36,9 @@
   {/if}
 
   {#if compilationStatus.status && compilationStatus.status.state != 'Succeeded'}
-    <div class="absolute inset-0 mt-20 grid items-start justify-center">
+    <div class="pointer-events-none absolute inset-0 mt-20 grid items-start justify-center">
       <div
-        class="grid h-[60vh] w-[50em] grid-rows-[auto_1fr] overflow-hidden rounded-lg bg-slate-600 shadow-xl"
+        class="pointer-events-auto grid h-[60vh] w-[50em] grid-rows-[auto_1fr] overflow-hidden rounded-lg bg-slate-600 shadow-xl"
       >
         <div
           class="flex items-center justify-between px-3 py-1 transition {compilationError

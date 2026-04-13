@@ -25,6 +25,9 @@ export default defineConfig({
     fs: {
       allow: ['./tailwind.config.ts'],
     },
+    proxy: {
+      '/api': 'http://localhost:3000',
+    },
   },
   plugins: [sveltekit(), Icons({ compiler: 'svelte' })],
 });

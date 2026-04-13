@@ -18,6 +18,9 @@ pub struct CompilerContext {
     pub no_arrays: bool,
     pub names: Vec<String>,
     pub array_names: Vec<String>,
+    /// Maximum scenario level for generation (1–7). Stored here so that
+    /// recursive calls through gen_guard → gen_commands respect the same limit.
+    pub level: u8,
 }
 
 impl Default for CompilerContext {
@@ -32,6 +35,7 @@ impl Default for CompilerContext {
             no_arrays: Default::default(),
             names: ["a", "b", "c", "d"].map(Into::into).to_vec(),
             array_names: ["A", "B", "C"].map(Into::into).to_vec(),
+            level: 7,
         }
     }
 }
@@ -106,25 +110,36 @@ fn bridge<R: Rng>(rng: &mut R) -> ErasedRng {
 
 #[derive(Clone, Copy)]
 enum Scenario {
+    // Level 1 — Assignment
+    SimpleAssignment,
+    // Level 2 — Sequencing
+    SequentialAssignments,
     Skip,
+    // Level 3 — Conditionals
     SimpleIf,
     MultiGuardIf2,
     MultiGuardIf3,
+    // Level 4 — Loops
     SimpleDo,
     DoNGuards2,
     DoNGuards3,
     DoNGuards4,
-    NestedIfInDo,
-    NestedDoInIf,
+    // Level 5 — Arrays
     ArrayAssignment,
     ArrayRead,
+    VariableAsIndex,
+    // Level 6 — Nondeterminism
     NonDeterministicOverlapping,
     VariableReuse,
-    VariableAsIndex,
+    // Level 7 — Composition
+    NestedIfInDo,
+    NestedDoInIf,
     Random,
 }
 
 const CATALOG: &[(f32, Scenario)] = &[
+    (1.0, Scenario::SimpleAssignment),
+    (1.5, Scenario::SequentialAssignments),
     (1.0, Scenario::Skip),
     (2.0, Scenario::SimpleIf),
     (2.0, Scenario::MultiGuardIf2),
@@ -133,19 +148,38 @@ const CATALOG: &[(f32, Scenario)] = &[
     (1.5, Scenario::DoNGuards2),
     (1.0, Scenario::DoNGuards3),
     (0.5, Scenario::DoNGuards4),
-    (1.5, Scenario::NestedIfInDo),
-    (1.5, Scenario::NestedDoInIf),
     (2.0, Scenario::ArrayAssignment),
     (2.0, Scenario::ArrayRead),
+    (1.0, Scenario::VariableAsIndex),
     (1.0, Scenario::NonDeterministicOverlapping),
     (1.0, Scenario::VariableReuse),
-    (1.0, Scenario::VariableAsIndex),
+    (1.5, Scenario::NestedIfInDo),
+    (1.5, Scenario::NestedDoInIf),
     (3.0, Scenario::Random),
 ];
 
-pub fn gen_commands<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
-    let scenario = CATALOG.choose_weighted(rng, |item| item.0).unwrap().1;
+fn scenario_level(s: Scenario) -> u8 {
+    match s {
+        Scenario::SimpleAssignment => 1,
+        Scenario::SequentialAssignments | Scenario::Skip => 2,
+        Scenario::SimpleIf | Scenario::MultiGuardIf2 | Scenario::MultiGuardIf3 => 3,
+        Scenario::SimpleDo | Scenario::DoNGuards2 | Scenario::DoNGuards3 | Scenario::DoNGuards4 => {
+            4
+        }
+        Scenario::ArrayAssignment | Scenario::ArrayRead | Scenario::VariableAsIndex => 5,
+        Scenario::NonDeterministicOverlapping | Scenario::VariableReuse => 6,
+        Scenario::NestedIfInDo | Scenario::NestedDoInIf | Scenario::Random => 7,
+    }
+}
+
+fn dispatch_scenario<R: Rng>(
+    scenario: Scenario,
+    cx: &mut CompilerContext,
+    rng: &mut R,
+) -> Commands {
     match scenario {
+        Scenario::SimpleAssignment => gen_simple_assignment(cx, rng),
+        Scenario::SequentialAssignments => gen_sequential_assignments(cx, rng),
         Scenario::Skip => gen_skip_program(cx, rng),
         Scenario::SimpleIf => gen_simple_if(cx, rng),
         Scenario::MultiGuardIf2 => gen_multi_guard_if(cx, rng, 2),
@@ -165,8 +199,47 @@ pub fn gen_commands<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
     }
 }
 
+/// Generate commands using `cx.level` as the scenario filter.
+/// Recursive calls (e.g. gen_guard → gen_commands) inherit the same limit.
+pub fn gen_commands<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
+    if cx.level < 5 {
+        cx.no_arrays = true;
+    }
+    let catalog: Vec<(f32, Scenario)> = CATALOG
+        .iter()
+        .filter(|(_, s)| scenario_level(*s) <= cx.level)
+        .cloned()
+        .collect();
+    let scenario = catalog.choose_weighted(rng, |item| item.0).unwrap().1;
+    dispatch_scenario(scenario, cx, rng)
+}
+
+/// Set `cx.level` and generate commands restricted to that level.
+/// 1=Assignment, 2=Sequencing, 3=Conditionals, 4=Loops,
+/// 5=Arrays, 6=Nondeterminism, 7=Composition (all).
+pub fn gen_commands_for_level<R: Rng>(level: u8, cx: &mut CompilerContext, rng: &mut R) -> Commands {
+    cx.level = level;
+    gen_commands(cx, rng)
+}
+
 fn gen_random_commands<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
     Commands(cx.many(1, 10, rng, gen_command))
+}
+
+fn gen_simple_assignment<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
+    Commands(vec![Command::Assignment(
+        gen_target(cx, rng),
+        gen_aexpr(cx, rng),
+    )])
+}
+
+fn gen_sequential_assignments<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
+    let n = rng.random_range(2..=4usize);
+    Commands(
+        (0..n)
+            .map(|_| Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng)))
+            .collect(),
+    )
 }
 
 fn gen_skip_program<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
