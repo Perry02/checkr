@@ -30,6 +30,16 @@ impl Default for InterpreterContext {
     }
 }
 
+impl InterpreterContext {
+    pub fn new<R: Rng>(level: u32, compiler_context: CompilerContext, _rng: &mut R) -> Self {
+        InterpreterContext {
+            level,
+            compiler_context,
+            ..Default::default()
+        }
+    }
+}
+
 impl<G> GenOptionsNested<G> {
     pub fn generate(&self, cx: &mut CompilerContext, rng: &mut ErasedRng) -> G {
         cx.fuel = cx.fuel.checked_sub(1).unwrap_or_default();
@@ -399,7 +409,7 @@ fn lvl_undefined(cx: &mut CompilerContext) -> GenOptionsNested<Commands> {
                 |cx: &mut CompilerContext,
                  rng: &mut ErasedRng,
                  gnopt: &GenOptionsNested<Commands>| {
-                    // TODO add undefined semantics, could be done similar to  Nondeterminism
+                    // TODO add undefined semantics, could be done similar to Nondeterminism
                     // Condition
                     Commands(vec![Command::Skip])
                 },
@@ -411,7 +421,7 @@ fn lvl_undefined(cx: &mut CompilerContext) -> GenOptionsNested<Commands> {
                 |cx: &mut CompilerContext,
                  rng: &mut ErasedRng,
                  gnopt: &GenOptionsNested<Commands>| {
-                    // TODO add undefined semantics, could be done similar to  Nondeterminism
+                    // TODO add undefined semantics, could be done similar to Nondeterminism
                     // Loop
                     Commands(vec![Command::Skip])
                 },
