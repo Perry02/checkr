@@ -37,6 +37,7 @@ export class Io<A extends ce_shell.Analysis> {
   input: Input<A> = $state(null as any);
   meta: Meta<A> | null = $state(null);
   reference: Results<A> = $state(defaultResults());
+  level: number = $state(7);
 
   currentJob: { jobId: number; input: Input<A> } | null = $state(null);
   rerunNonce = $state(0);
@@ -167,7 +168,7 @@ export class Io<A extends ce_shell.Analysis> {
   }
 
   async generate(seed?: number): Promise<Input<A>> {
-    const result = await api.generate({ analysis: this.analysis, seed: seed ?? null }).data;
+    const result = await api.generate({ analysis: this.analysis, seed: seed ?? null, level: this.level }).data;
     this.input = result.json as any;
     return result.json as any;
   }

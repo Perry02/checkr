@@ -19,6 +19,7 @@ pub struct CompilerContext {
     pub no_arrays: bool,
     pub names: Vec<String>,
     pub array_names: Vec<String>,
+    pub level: u8,
 }
 
 impl Default for CompilerContext {
@@ -33,6 +34,7 @@ impl Default for CompilerContext {
             no_arrays: Default::default(),
             names: ["a", "b", "c", "d"].map(Into::into).to_vec(),
             array_names: ["A", "B", "C"].map(Into::into).to_vec(),
+            level: 7,
         }
     }
 }
@@ -109,6 +111,8 @@ fn bridge<R: Rng>(rng: &mut R) -> ErasedRng {
 
 #[derive(Clone, Copy)]
 enum Scenario {
+    SimpleAssignment,
+    SequentialAssignments,
     Skip,
     SimpleIf,
     MultiGuardIf2,
@@ -128,6 +132,8 @@ enum Scenario {
 }
 
 const CATALOG: &[(f32, Scenario)] = &[
+    (1.0, Scenario::SimpleAssignment),
+    (1.5, Scenario::SequentialAssignments),
     (1.0, Scenario::Skip),
     (2.0, Scenario::SimpleIf),
     (2.0, Scenario::MultiGuardIf2),
@@ -146,9 +152,33 @@ const CATALOG: &[(f32, Scenario)] = &[
     (3.0, Scenario::Random),
 ];
 
-pub fn gen_commands<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
-    let scenario = CATALOG.choose_weighted(rng, |item| item.0).unwrap().1;
+fn scenario_level(s: Scenario) -> u8 {
+    match s {
+        Scenario::SimpleAssignment => 1,
+        Scenario::SequentialAssignments => 2,
+        Scenario::Skip => 2,
+        Scenario::SimpleIf => 3,
+        Scenario::MultiGuardIf2 => 3,
+        Scenario::MultiGuardIf3 => 3,
+        Scenario::SimpleDo => 4,
+        Scenario::DoNGuards2 => 4,
+        Scenario::DoNGuards3 => 4,
+        Scenario::DoNGuards4 => 4,
+        Scenario::NestedIfInDo => 4,
+        Scenario::NestedDoInIf => 4,
+        Scenario::ArrayAssignment => 5,
+        Scenario::ArrayRead => 5,
+        Scenario::VariableAsIndex => 5,
+        Scenario::NonDeterministicOverlapping => 6,
+        Scenario::VariableReuse => 6,
+        Scenario::Random => 7,
+    }
+}
+
+fn dispatch_scenario<R: Rng>(scenario: Scenario, cx: &mut CompilerContext, rng: &mut R) -> Commands {
     match scenario {
+        Scenario::SimpleAssignment => gen_simple_assignment(cx, rng),
+        Scenario::SequentialAssignments => gen_sequential_assignments(cx, rng),
         Scenario::Skip => gen_skip_program(cx, rng),
         Scenario::SimpleIf => gen_simple_if(cx, rng),
         Scenario::MultiGuardIf2 => gen_multi_guard_if(cx, rng, 2),
@@ -166,6 +196,33 @@ pub fn gen_commands<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
         Scenario::VariableAsIndex => gen_variable_as_index(cx, rng),
         Scenario::Random => gen_random_commands(cx, rng),
     }
+}
+
+pub fn gen_commands<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
+    if cx.level < 5 {
+        cx.no_arrays = true;
+    }
+    let catalog: Vec<(f32, Scenario)> = CATALOG
+        .iter()
+        .filter(|(_, s)| scenario_level(*s) <= cx.level)
+        .cloned()
+        .collect();
+    let scenario = catalog.choose_weighted(rng, |item| item.0).unwrap().1;
+    dispatch_scenario(scenario, cx, rng)
+}
+
+pub fn gen_commands_for_level<R: Rng>(level: u8, cx: &mut CompilerContext, rng: &mut R) -> Commands {
+    cx.level = level;
+    gen_commands(cx, rng)
+}
+
+fn gen_simple_assignment<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
+    Commands(vec![Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng))])
+}
+
+fn gen_sequential_assignments<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {
+    let n = rng.random_range(2..=4usize);
+    Commands((0..n).map(|_| Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng))).collect())
 }
 
 fn gen_random_commands<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Commands {

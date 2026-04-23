@@ -8,12 +8,15 @@ use gcl::pg::Determinism;
 use rand::{SeedableRng, seq::IndexedRandom};
 use roxmltree::Document;
 
-fn covered_lines(xml: &str) -> HashSet<(String, u32)> {
+fn covered_lines(xml: &str, file_filter: &str) -> HashSet<(String, u32)> {
     let doc = Document::parse(xml).unwrap();
     let mut covered = HashSet::new();
 
     for class in doc.descendants().filter(|n| n.has_tag_name("class")) {
         let filename = class.attribute("filename").unwrap_or("").to_string();
+        if !filename.contains(file_filter) {
+            continue;
+        }
         for line in class
             .children()
             .filter(|n| n.has_tag_name("lines"))
@@ -30,6 +33,25 @@ fn covered_lines(xml: &str) -> HashSet<(String, u32)> {
     covered
 }
 
+fn total_lines_in_file(xml: &str, file_filter: &str) -> usize {
+    let doc = Document::parse(xml).unwrap();
+    let mut total = 0;
+    for class in doc.descendants().filter(|n| n.has_tag_name("class")) {
+        let filename = class.attribute("filename").unwrap_or("");
+        if !filename.contains(file_filter) {
+            continue;
+        }
+        for _ in class
+            .children()
+            .filter(|n| n.has_tag_name("lines"))
+            .flat_map(|ls| ls.children().filter(|n| n.has_tag_name("line")))
+        {
+            total += 1;
+        }
+    }
+    total
+}
+
 /// Runs dotnet-coverage for `test_amount` seeds using the provided arg generator.
 /// Returns (unique_lines_hit, total_instrumentable_lines).
 /// Unique lines = union of all lines hit across all seeds.
@@ -38,6 +60,7 @@ async fn coverage_test(
     cwd: &std::path::PathBuf,
     driver: &driver::Driver<InspectifyJobMeta>,
     label: &str,
+    file_filter: &str,
     test_amount: usize,
     mut get_args: impl FnMut(usize) -> (String, String),
 ) -> (usize, usize) {
@@ -48,14 +71,7 @@ async fn coverage_test(
     let mut total_possible = 0usize;
 
     for index in 1..=test_amount {
-        print!("  [{label}] seed {index}...");
-
         let (program, args) = get_args(index);
-        // DEBUG: show the program being tested
-        println!(
-            "    program: {program}, args (first 120 chars): {}",
-            &args[..args.len().min(120)]
-        );
 
         let job = hub.exec_command(
             JobKind::Compilation,
@@ -75,43 +91,24 @@ async fn coverage_test(
         );
 
         job.wait().await;
-        // debugging lines
-        let out = job.stdout();
-        let err = job.stderr();
-        if !out.trim().is_empty() {
-            println!("    stdout: {}", &out[..out.len().min(200)]);
-        }
-        if !err.trim().is_empty() {
-            println!("    stderr: {}", &err[..err.len().min(200)]);
-        }
 
         let xml_path = cwd.join("coverage.xml");
         let xml = fs::read_to_string(&xml_path).expect("coverage.xml not found");
 
         if total_possible == 0 {
-            let doc = Document::parse(&xml).unwrap();
-            for _ in doc.descendants().filter(|n| n.has_tag_name("line")) {
-                total_possible += 1;
-            }
+            total_possible = total_lines_in_file(&xml, file_filter);
         }
 
-        let this_run = covered_lines(&xml);
-        let hit_this_run = this_run.len();
+        let this_run = covered_lines(&xml, file_filter);
         let new_this_seed = this_run.difference(&union_covered).count();
-        union_covered.extend(this_run.clone());
+        union_covered.extend(this_run);
 
-        // debugging lines
-        let mut files: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
-        for (f, _) in &this_run {
-            files.insert(f.as_str());
-        }
-        println!("    covered files: {files:?}");
-
-        println!(
-            "    hit {hit_this_run} unique lines this run (+{new_this_seed} new, cumulative: {})",
+        print!(
+            "\r  [{label}] {index}/{test_amount} — {file_filter}: {}/{total_possible} lines (+{new_this_seed} new)",
             union_covered.len()
         );
     }
+    println!();
 
     (union_covered.len(), total_possible)
 }
@@ -164,58 +161,113 @@ fn compiler_input_new_gen(seed: usize) -> (String, String) {
     )
 }
 
+struct RepoResult {
+    name: String,
+    old_unique: usize,
+    old_total: usize,
+    new_unique: usize,
+    new_total: usize,
+}
+
 #[tokio::test]
 async fn test_thingy() {
-    // step 1. install dotnet-coverage: "dotnet tool install -g dotnet-coverage"
-    // step 2. run "dotnet publish -c Release --self-contained --output bin/run" in the F# project root
-    // step 3. set path_to_fsharp to the F# project root
-    // step 4. set test_amount to the number of seeds per generator
-    // step 5. run this test
+    // Prerequisites:
+    //   dotnet tool install -g dotnet-coverage
+    //   Each repo must already be compiled: dotnet publish -c Release --self-contained --output bin/run
 
-    let hub: driver::Hub<InspectifyJobMeta> = driver::Hub::new().expect("");
-    let path_to_fsharp = "D:/checkr/student_implementation/Group-03-Sorbet-Seagulls/code";
-    let cwd = dunce::canonicalize(path_to_fsharp).expect("msg");
-    let driver =
-        driver::Driver::new_from_path(hub.clone(), ".", path_to_fsharp.to_owned() + "/run.toml")
-            .expect("");
+    let student_repos_root = "D:/checkr/Student-repos-for-testing";
+    let test_amount = 100;
 
-    driver.ensure_compile(InspectifyJobMeta::default());
+    // Discover all repos: any subdirectory that contains a code/run.toml
+    let mut repo_paths: Vec<(String, std::path::PathBuf)> = std::fs::read_dir(student_repos_root)
+        .expect("could not read Student-repos-for-testing")
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let code_path = entry.path().join("code");
+            if code_path.join("run.toml").exists() {
+                Some((name, code_path))
+            } else {
+                None
+            }
+        })
+        .collect();
+    repo_paths.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let test_amount = 5000;
-
-    // Compiler with OLD gcl_gen
-    println!("\n=== Compiler (old gcl_gen)");
-    let (old_unique, old_total) = coverage_test(
-        &hub,
-        &cwd,
-        &driver,
-        "old gcl_gen",
-        test_amount,
-        compiler_input_old_gen,
-    )
-    .await;
-    let old_pct = old_unique as f64 / old_total as f64 * 100.0;
-
-    // Compiler with NEW gcl_compiler_gen
-    println!("\n=== Compiler (new gcl_compiler_gen)");
-    let (new_unique, new_total) = coverage_test(
-        &hub,
-        &cwd,
-        &driver,
-        "new gcl_compiler_gen",
-        test_amount,
-        compiler_input_new_gen,
-    )
-    .await;
-    let new_pct = new_unique as f64 / new_total as f64 * 100.0;
-
-    // Summary
-    println!("\n=== Coverage comparison ({test_amount} seeds each) ===");
-    println!("Old gcl_gen         — unique lines: {old_unique}/{old_total} = {old_pct:.2}%");
-    println!("New gcl_compiler_gen — unique lines: {new_unique}/{new_total} = {new_pct:.2}%");
-    println!(
-        "Improvement: {:+.2}% ({:+} unique lines)",
-        new_pct - old_pct,
-        new_unique as i64 - old_unique as i64,
+    assert!(
+        !repo_paths.is_empty(),
+        "no student repos found in {student_repos_root}"
     );
+
+    let hub: driver::Hub<InspectifyJobMeta> = driver::Hub::new().expect("hub init failed");
+    let mut results: Vec<RepoResult> = Vec::new();
+
+    for (name, code_path) in &repo_paths {
+        println!("\n{}", "=".repeat(60));
+        println!("=== Repo: {name}");
+        println!("{}", "=".repeat(60));
+
+        let cwd = dunce::canonicalize(code_path)
+            .unwrap_or_else(|_| panic!("could not canonicalize {}", code_path.display()));
+        let run_toml = cwd.join("run.toml");
+
+        let driver = driver::Driver::new_from_path(hub.clone(), &cwd, run_toml)
+            .unwrap_or_else(|e| panic!("driver init failed for {name}: {e}"));
+
+        println!("  Compiling...");
+        if let Some(job) = driver.ensure_compile(InspectifyJobMeta::default()) {
+            job.wait().await;
+        }
+
+        println!("\n  --- Old gcl_gen ({test_amount} seeds) ---");
+        let (old_unique, old_total) = coverage_test(
+            &hub,
+            &cwd,
+            &driver,
+            "old gcl_gen",
+            "Compiler.fs",
+            test_amount,
+            compiler_input_old_gen,
+        )
+        .await;
+
+        println!("\n  --- New gcl_compiler_gen ({test_amount} seeds) ---");
+        let (new_unique, new_total) = coverage_test(
+            &hub,
+            &cwd,
+            &driver,
+            "new gcl_gen",
+            "Compiler.fs",
+            test_amount,
+            compiler_input_new_gen,
+        )
+        .await;
+
+        results.push(RepoResult {
+            name: name.clone(),
+            old_unique,
+            old_total,
+            new_unique,
+            new_total,
+        });
+    }
+
+    // Final summary table
+    println!("\n\n{}", "=".repeat(80));
+    println!("=== SUMMARY ({test_amount} seeds each generator) ===");
+    println!(
+        "{:<45} {:>12} {:>12} {:>10}",
+        "Repo", "Old %", "New %", "Delta"
+    );
+    println!("{}", "-".repeat(80));
+    for r in &results {
+        let old_pct = r.old_unique as f64 / r.old_total as f64 * 100.0;
+        let new_pct = r.new_unique as f64 / r.new_total as f64 * 100.0;
+        let delta = new_pct - old_pct;
+        println!(
+            "{:<45} {:>11.2}% {:>11.2}% {:>+10.2}%",
+            r.name, old_pct, new_pct, delta
+        );
+    }
+    println!("{}", "-".repeat(80));
 }

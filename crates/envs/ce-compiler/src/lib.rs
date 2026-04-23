@@ -2,7 +2,7 @@ mod dot;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ce_core::gn::compiler_gen::{CompilerContext, gen_commands, generate_witness_memories};
+use ce_core::gn::compiler_gen::{CompilerContext, gen_commands_for_level, generate_witness_memories};
 use ce_core::{Env, Generate, ValidationResult, define_env};
 use gcl::{
     ast::Commands,
@@ -24,6 +24,12 @@ pub struct Input {
     pub determinism: Determinism,
     #[serde(default)]
     pub witness_mems: Vec<InterpreterMemory>,
+    #[serde(default = "default_level")]
+    pub level: u8,
+}
+
+fn default_level() -> u8 {
+    7
 }
 
 #[derive(tapi::Tapi, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -103,19 +109,23 @@ impl Env for CompilerEnv {
         let o_g = dot::dot_to_petgraph(&o_dot).expect("we always produce valid dot");
 
         if action_bag(&o_g, &sample_mems) != action_bag(&t_g, &sample_mems) {
-            return Ok(ValidationResult::Mismatch {
-                reason: "the graphs have different structure".to_string(),
-            });
+            return Ok((
+                ValidationResult::Mismatch {
+                    reason: "the graphs have different structure".to_string(),
+                },
+                (),
+            ));
         }
 
         // Path fingerprint check — catches structural difference action_bag misses
         match (path_fingerprints(&o_g), path_fingerprints(&t_g)) {
-            (Some(o_paths), Some(t_paths)) if o_paths != t_paths => {
-                Ok(ValidationResult::Mismatch {
+            (Some(o_paths), Some(t_paths)) if o_paths != t_paths => Ok((
+                ValidationResult::Mismatch {
                     reason: "path fingerprints differ — graph structure mismatch".to_string(),
-                })
-            }
-            _ => Ok(ValidationResult::Correct),
+                },
+                (),
+            )),
+            _ => Ok((ValidationResult::Correct, ())),
         }
     }
 }
@@ -124,17 +134,26 @@ impl Generate for Input {
     type Context = ();
 
     fn gn<R: ce_core::rand::Rng>(_cx: &mut Self::Context, rng: &mut R) -> Self {
-        let determinism = *[Determinism::Deterministic, Determinism::NonDeterministic]
+        gen_input_for_level(7, rng)
+    }
+}
+
+pub fn gen_input_for_level<R: rand::Rng>(level: u8, rng: &mut R) -> Input {
+    let determinism = if level >= 6 {
+        *[Determinism::Deterministic, Determinism::NonDeterministic]
             .choose(rng)
-            .unwrap();
-        let commands = gen_commands(&mut CompilerContext::default(), rng);
-        let mut w_rng = <rand::rngs::SmallRng as rand::SeedableRng>::seed_from_u64(0xCEC34);
-        let witness_mems = generate_witness_memories(&commands, &mut w_rng);
-        Input {
-            commands: Stringify::new(commands),
-            determinism,
-            witness_mems,
-        }
+            .unwrap()
+    } else {
+        Determinism::Deterministic
+    };
+    let commands = gen_commands_for_level(level, &mut CompilerContext::new(10, rng), rng);
+    let mut w_rng = <rand::rngs::SmallRng as rand::SeedableRng>::seed_from_u64(0xCEC34);
+    let witness_mems = generate_witness_memories(&commands, &mut w_rng);
+    Input {
+        commands: Stringify::new(commands),
+        determinism,
+        witness_mems,
+        level,
     }
 }
 
