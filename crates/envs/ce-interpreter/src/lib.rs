@@ -175,9 +175,10 @@ impl Generate for Input {
     fn gn<R: rand::Rng>(_cx: &mut Self::Context, mut rng: &mut R) -> Self {
         //let commands = gcl::ast::Commands::gn(&mut Default::default(), rng);
         let commands = generate_selective(
-            &mut InterpreterContext::new(1, CompilerContext::default(), rng),
+            &mut InterpreterContext::new(8, CompilerContext::new(8, rng), rng),
             rng,
         );
+
         let initial_memory = gcl::memory::Memory::from_targets_with(
             commands.fv(),
             &mut rng,
