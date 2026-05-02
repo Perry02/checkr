@@ -1,6 +1,6 @@
 <script lang="ts">
   import { browser } from '$app/environment';
-  import { GCL } from '$lib/api';
+  import { GCL, type Interpreter } from '$lib/api';
   import Env from '$lib/components/Env.svelte';
   import Network from '$lib/components/Network.svelte';
   import StandardInput from '$lib/components/StandardInput.svelte';
@@ -11,6 +11,8 @@
   import InputOption from '$lib/components/InputOption.svelte';
   import DeterminismInput from '$lib/components/DeterminismInput.svelte';
 
+  import { showReference } from '$lib/jobs.svelte';
+
   const io = new Io('Interpreter', {
     commands: 'skip',
     determinism: GCL.DETERMINISM[0],
@@ -18,6 +20,53 @@
     trace_length: 10,
   });
   let vars = $derived(io.meta ?? []);
+
+  const highlightDot = (dot: string, initialNode: string, trace: Interpreter.Step[]) => {
+    let highlightedDot = dot;
+    const pathNodes = new Set([initialNode]);
+    const pathEdges: { from: string; to: string; label: string }[] = [];
+
+    let currentNode = initialNode;
+    for (const step of trace) {
+      pathNodes.add(step.node);
+      pathEdges.push({ from: currentNode, to: step.node, label: step.action });
+      currentNode = step.node;
+    }
+
+    const nodeMap: Record<string, string> = {
+      'q▷': 'qStart',
+      'q◀': 'qFinal',
+    };
+    const getId = (node: string) => nodeMap[node] || node;
+
+    // Highlight nodes
+    for (const node of pathNodes) {
+      const id = getId(node);
+      const nodeRegex = new RegExp(`("${id}"|\\b${id}\\b)\\s*\\[`, 'g');
+      if (highlightedDot.match(nodeRegex)) {
+        highlightedDot = highlightedDot.replace(nodeRegex, `$1 [color="#34d399", penwidth=3, `);
+      } else {
+        highlightedDot = highlightedDot.replace(
+          new RegExp(`("${id}"|\\b${id}\\b)\\s*;`, 'g'),
+          `$1 [color="#34d399", penwidth=3];`,
+        );
+      }
+    }
+
+    // Highlight edges
+    for (const edge of pathEdges) {
+      const fromId = getId(edge.from);
+      const toId = getId(edge.to);
+      const escapedLabel = edge.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const edgeRegex = new RegExp(
+        `("${fromId}"|\\b${fromId}\\b)\\s*->\\s*("${toId}"|\\b${toId}\\b)\\s*\\[(?=[^\\]]*label\\s*=\\s*\\"${escapedLabel}\\")`,
+        'g',
+      );
+      highlightedDot = highlightedDot.replace(edgeRegex, `$1 -> $2 [color="#34d399", penwidth=3, `);
+    }
+
+    return highlightedDot;
+  };
 
   $effect.pre(() => {
     if (browser) {
@@ -148,7 +197,11 @@
 
       <div class="relative">
         <div class="absolute inset-0 grid overflow-auto">
-          <Network dot={output.dot} />
+          <Network
+            dot={showReference.show
+              ? output.dot
+              : highlightDot(output.dot, output.initial_node, output.trace)}
+          />
         </div>
       </div>
     </div>
