@@ -10,7 +10,6 @@
   import InputOptions from '$lib/components/InputOptions.svelte';
   import InputOption from '$lib/components/InputOption.svelte';
   import DeterminismInput from '$lib/components/DeterminismInput.svelte';
-
   import { showReference } from '$lib/jobs.svelte';
 
   const io = new Io('Interpreter', {
@@ -21,7 +20,13 @@
   });
   let vars = $derived(io.meta ?? []);
 
-  const highlightDot = (dot: string, initialNode: string, trace: Interpreter.Step[]) => {
+  const highlightDot = (
+    dot: string,
+    initialNode: string,
+    trace: Interpreter.Step[],
+    termination: Interpreter.TerminationState,
+  ) => {
+    const color = termination === 'Stuck' ? '#ef4444' : '#34d399';
     let highlightedDot = dot;
     const pathNodes = new Set([initialNode]);
     const pathEdges: { from: string; to: string; label: string }[] = [];
@@ -44,11 +49,11 @@
       const id = getId(node);
       const nodeRegex = new RegExp(`("${id}"|\\b${id}\\b)\\s*\\[`, 'g');
       if (highlightedDot.match(nodeRegex)) {
-        highlightedDot = highlightedDot.replace(nodeRegex, `$1 [color="#34d399", penwidth=3, `);
+        highlightedDot = highlightedDot.replace(nodeRegex, `$1 [color="${color}", penwidth=3, `);
       } else {
         highlightedDot = highlightedDot.replace(
           new RegExp(`("${id}"|\\b${id}\\b)\\s*;`, 'g'),
-          `$1 [color="#34d399", penwidth=3];`,
+          `$1 [color="${color}", penwidth=3];`,
         );
       }
     }
@@ -62,7 +67,7 @@
         `("${fromId}"|\\b${fromId}\\b)\\s*->\\s*("${toId}"|\\b${toId}\\b)\\s*\\[(?=[^\\]]*label\\s*=\\s*\\"${escapedLabel}\\")`,
         'g',
       );
-      highlightedDot = highlightedDot.replace(edgeRegex, `$1 -> $2 [color="#34d399", penwidth=3, `);
+      highlightedDot = highlightedDot.replace(edgeRegex, `$1 -> $2 [color="${color}", penwidth=3, `);
     }
 
     return highlightedDot;
@@ -200,7 +205,7 @@
           <Network
             dot={showReference.show
               ? output.dot
-              : highlightDot(output.dot, output.initial_node, output.trace)}
+              : highlightDot(output.dot, output.initial_node, output.trace, output.termination)}
           />
         </div>
       </div>
