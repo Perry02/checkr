@@ -390,9 +390,6 @@ export namespace inspectify {
       annotation: (ce_shell.io.Annotation | null),
       error: (string | null)
     };
-    export type PublicEvent =
-      | { "type": "Reset" }
-      | { "type": "StateChanged", "value": inspectify.checko.scoreboard.PublicState };
     export type AnalysisExecution = {
       id: driver.job.JobId
     };
@@ -409,9 +406,6 @@ export namespace inspectify {
       stdout: string,
       spans: inspectify.endpoints.Span[],
       analysis_data: (inspectify.endpoints.AnalysisData | null)
-    };
-    export type AnalysisExecution = {
-      id: driver.job.JobId
     };
     export type Program = {
       hash: ce_shell.io.Hash,
