@@ -90,6 +90,56 @@
       }
     }
   });
+
+  let highlightedTraceIndices = $state(new Set<number>());
+
+  $effect(() => {
+    io.results.output;
+    highlightedTraceIndices = new Set();
+  });
+
+  const onGraphClick = (params: {
+    nodes: string[];
+    edges: { from: string; to: string; label: string }[];
+  }) => {
+    const indices = new Set<number>();
+
+    const reverseNodeMap: Record<string, string> = {
+      qStart: 'q▷',
+      qFinal: 'q◀',
+    };
+    const fromId = (id: string) => reverseNodeMap[id] || id;
+
+    const output = io.results.output;
+    if (!output) return;
+
+    const fullTrace = [
+      { action: '', node: output.initial_node, memory: io.results.input.assignment },
+      ...output.trace,
+    ];
+
+    if (params.nodes.length > 0) {
+      const node = fromId(params.nodes[0]);
+      fullTrace.forEach((step, i) => {
+        if (step.node === node) indices.add(i);
+      });
+    } else if (params.edges.length > 0) {
+      const edge = params.edges[0];
+      const from = fromId(edge.from);
+      const to = fromId(edge.to);
+      const label = edge.label;
+
+      fullTrace.forEach((step, i) => {
+        if (i === 0) return;
+        const prevStep = fullTrace[i - 1];
+        if (prevStep.node === from && step.node === to && step.action === label) {
+          indices.add(i);
+        }
+      });
+    }
+
+    highlightedTraceIndices = indices;
+  };
 </script>
 
 <Env {io}>
@@ -169,16 +219,26 @@
             </div>
           {/each}
 
-          {#each [{ action: '', node: output.initial_node, memory: cachedInput.assignment }, ...output.trace] as step}
-            <div class="line-clamp-1 max-w-[25ch] text-sm">
+          {#each [{ action: '', node: output.initial_node, memory: cachedInput.assignment }, ...output.trace] as step, i}
+            <div
+              class="line-clamp-1 max-w-[25ch] text-sm {highlightedTraceIndices.has(i)
+                ? 'bg-white/10'
+                : ''}"
+            >
               <code>{step.action}</code>
             </div>
-            <div class="text-center">{toSubscript(step.node)}</div>
+            <div class="text-center {highlightedTraceIndices.has(i) ? 'bg-white/10' : ''}">
+              {toSubscript(step.node)}
+            </div>
             {#if meta.length == 0}
-              <div></div>
+              <div class={highlightedTraceIndices.has(i) ? 'bg-white/10' : ''}></div>
             {/if}
             {#each meta as v}
-              <div class="px-1 text-right font-mono text-slate-300">
+              <div
+                class="px-1 text-right font-mono text-slate-300 {highlightedTraceIndices.has(i)
+                  ? 'bg-white/10'
+                  : ''}"
+              >
                 {v.kind == 'Array'
                   ? JSON.stringify(step.memory.arrays[v.name])
                   : step.memory.variables[v.name]}
@@ -208,6 +268,7 @@
             dot={showReference.show
               ? output.dot
               : highlightDot(output.dot, output.initial_node, output.trace, output.termination)}
+            onclick={onGraphClick}
           />
         </div>
       </div>

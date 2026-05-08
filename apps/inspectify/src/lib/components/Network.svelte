@@ -5,18 +5,21 @@
 
   interface Props {
     dot: string;
+    onclick?: (params: { nodes: string[]; edges: { from: string; to: string; label: string }[] }) => void;
   }
 
-  let { dot }: Props = $props();
+  let { dot, onclick }: Props = $props();
 
   let container: HTMLDivElement | undefined = $state();
   let network: Network | undefined = $state();
+  let currentData: any = $state();
 
   let redraw = $derived(async () => {
     let preDot = dot;
     const vis = await import('vis-network/esnext');
     if (preDot != dot) return;
     const data = vis.parseDOTNetwork(dot);
+    currentData = data;
 
     data.nodes.forEach((node: any) => {
       if (node.color) {
@@ -73,6 +76,17 @@
           },
         },
         autoResize: true,
+      });
+
+      network.on('click', (params) => {
+        const nodes = params.nodes;
+        const edges = params.edges
+          .map((id: any) => {
+            const edge = currentData.edges.find((e: any) => e.id === id);
+            return edge ? { from: edge.from, to: edge.to, label: edge.label } : null;
+          })
+          .filter(Boolean);
+        onclick?.({ nodes, edges });
       });
     }
   });
