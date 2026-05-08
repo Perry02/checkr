@@ -18,6 +18,26 @@
     if (preDot != dot) return;
     const data = vis.parseDOTNetwork(dot);
 
+    data.nodes.forEach((node: any) => {
+      if (node.color) {
+        const c = typeof node.color === 'string' ? node.color : node.color.background;
+        node.color = {
+          background: c,
+          border: c,
+          highlight: { background: c, border: c },
+        };
+      }
+    });
+    data.edges.forEach((edge: any) => {
+      if (edge.color) {
+        const c = typeof edge.color === 'string' ? edge.color : edge.color.color;
+        edge.color = {
+          color: c,
+          highlight: c,
+        };
+      }
+    });
+
     if (network) {
       network.setData(data);
     } else {
@@ -29,10 +49,10 @@
           color: {
             background: mirage.ui.fg.hex(),
             border: mirage.ui.fg.hex(),
-            highlight: mirage.ui.fg.brighten(1).hex(),
-            // background: '#666666',
-            // border: '#8080a0',
-            // highlight: '#80a0ff',
+            highlight: {
+              background: mirage.ui.fg.hex(),
+              border: mirage.ui.fg.hex(),
+            },
           },
           font: {
             color: 'white',
@@ -42,8 +62,10 @@
           size: 30,
         },
         edges: {
-          // color: '#D0D0FF',
-          color: mirage.syntax.constant.hex(),
+          color: {
+            color: mirage.syntax.constant.hex(),
+            highlight: mirage.syntax.constant.hex(),
+          },
           font: {
             color: 'white',
             strokeColor: '#200020',
