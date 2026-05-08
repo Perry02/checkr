@@ -43,16 +43,18 @@
       'q◀': 'qFinal',
     };
     const getId = (node: string) => nodeMap[node] || node;
+    const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
     // Highlight nodes
     for (const node of pathNodes) {
       const id = getId(node);
-      const nodeRegex = new RegExp(`("${id}"|\\b${id}\\b)\\s*\\[`, 'g');
+      const escapedId = escapeRegex(id);
+      const nodeRegex = new RegExp(`(?<!->\\s*)("${escapedId}"|\\b${escapedId}\\b)\\s*\\[`, 'g');
       if (highlightedDot.match(nodeRegex)) {
         highlightedDot = highlightedDot.replace(nodeRegex, `$1 [color="${color}", penwidth=3, `);
       } else {
         highlightedDot = highlightedDot.replace(
-          new RegExp(`("${id}"|\\b${id}\\b)\\s*;`, 'g'),
+          new RegExp(`(?<!->\\s*)("${escapedId}"|\\b${escapedId}\\b)\\s*;`, 'g'),
           `$1 [color="${color}", penwidth=3];`,
         );
       }
@@ -60,9 +62,9 @@
 
     // Highlight edges
     for (const edge of pathEdges) {
-      const fromId = getId(edge.from);
-      const toId = getId(edge.to);
-      const escapedLabel = edge.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const fromId = escapeRegex(getId(edge.from));
+      const toId = escapeRegex(getId(edge.to));
+      const escapedLabel = escapeRegex(edge.label);
       const edgeRegex = new RegExp(
         `("${fromId}"|\\b${fromId}\\b)\\s*->\\s*("${toId}"|\\b${toId}\\b)\\s*\\[(?=[^\\]]*label\\s*=\\s*\\"${escapedLabel}\\")`,
         'g',
