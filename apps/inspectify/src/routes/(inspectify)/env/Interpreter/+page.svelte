@@ -1,6 +1,6 @@
 <script lang="ts">
   import { browser } from '$app/environment';
-  import { GCL } from '$lib/api';
+  import { GCL, type Interpreter } from '$lib/api';
   import Env from '$lib/components/Env.svelte';
   import Network from '$lib/components/Network.svelte';
   import StandardInput from '$lib/components/StandardInput.svelte';
@@ -11,6 +11,7 @@
   import InputOption from '$lib/components/InputOption.svelte';
   import DeterminismInput from '$lib/components/DeterminismInput.svelte';
   import LevelInput from '$lib/components/LevelInput.svelte';
+  import { showReference } from '$lib/jobs.svelte';
 
   const io = new Io('Interpreter', {
     commands: 'skip',
@@ -20,6 +21,64 @@
     level: 8,
   });
   let vars = $derived(io.meta ?? []);
+
+  const highlightDot = (
+    dot: string,
+    initialNode: string,
+    trace: Interpreter.Step[],
+    termination: Interpreter.TerminationState,
+  ) => {
+    const color = termination === 'Stuck' ? '#ef4444' : '#34d399';
+    let highlightedDot = dot;
+    const pathNodes = new Set([initialNode]);
+    const pathEdges: { from: string; to: string; label: string }[] = [];
+
+    let currentNode = initialNode;
+    for (const step of trace) {
+      pathNodes.add(step.node);
+      pathEdges.push({ from: currentNode, to: step.node, label: step.action });
+      currentNode = step.node;
+    }
+
+    const nodeMap: Record<string, string> = {
+      'q▷': 'qStart',
+      'q◀': 'qFinal',
+    };
+    const getId = (node: string) => nodeMap[node] || node;
+    const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Highlight nodes
+    for (const node of pathNodes) {
+      const id = getId(node);
+      const escapedId = escapeRegex(id);
+      const nodeRegex = new RegExp(`(?<!->\\s*)("${escapedId}"|\\b${escapedId}\\b)\\s*\\[`, 'g');
+      if (highlightedDot.match(nodeRegex)) {
+        highlightedDot = highlightedDot.replace(nodeRegex, `$1 [color="${color}", penwidth=3, `);
+      } else {
+        highlightedDot = highlightedDot.replace(
+          new RegExp(`(?<!->\\s*)("${escapedId}"|\\b${escapedId}\\b)\\s*;`, 'g'),
+          `$1 [color="${color}", penwidth=3];`,
+        );
+      }
+    }
+
+    // Highlight edges
+    for (const edge of pathEdges) {
+      const fromId = escapeRegex(getId(edge.from));
+      const toId = escapeRegex(getId(edge.to));
+      const escapedLabel = escapeRegex(edge.label);
+      const edgeRegex = new RegExp(
+        `("${fromId}"|\\b${fromId}\\b)\\s*->\\s*("${toId}"|\\b${toId}\\b)\\s*\\[(?=[^\\]]*label\\s*=\\s*\\"${escapedLabel}\\")`,
+        'g',
+      );
+      highlightedDot = highlightedDot.replace(
+        edgeRegex,
+        `$1 -> $2 [color="${color}", penwidth=3, `,
+      );
+    }
+
+    return highlightedDot;
+  };
 
   $effect.pre(() => {
     if (browser) {
@@ -47,6 +106,56 @@
     { n: 7, name: 'Undefined' },
     { n: 8, name: 'Composition' },
   ];
+
+  let highlightedTraceIndices = $state(new Set<number>());
+
+  $effect(() => {
+    io.results.output;
+    highlightedTraceIndices = new Set();
+  });
+
+  const onGraphClick = (params: {
+    nodes: string[];
+    edges: { from: string; to: string; label: string }[];
+  }) => {
+    const indices = new Set<number>();
+
+    const reverseNodeMap: Record<string, string> = {
+      qStart: 'q▷',
+      qFinal: 'q◀',
+    };
+    const fromId = (id: string) => reverseNodeMap[id] || id;
+
+    const output = io.results.output;
+    if (!output) return;
+
+    const fullTrace = [
+      { action: '', node: output.initial_node, memory: io.results.input.assignment },
+      ...output.trace,
+    ];
+
+    if (params.nodes.length > 0) {
+      const node = fromId(params.nodes[0]);
+      fullTrace.forEach((step, i) => {
+        if (step.node === node) indices.add(i);
+      });
+    } else if (params.edges.length > 0) {
+      const edge = params.edges[0];
+      const from = fromId(edge.from);
+      const to = fromId(edge.to);
+      const label = edge.label;
+
+      fullTrace.forEach((step, i) => {
+        if (i === 0) return;
+        const prevStep = fullTrace[i - 1];
+        if (prevStep.node === from && step.node === to && step.action === label) {
+          indices.add(i);
+        }
+      });
+    }
+
+    highlightedTraceIndices = indices;
+  };
 </script>
 
 <Env {io}>
@@ -127,16 +236,26 @@
               </div>
             {/each}
 
-            {#each [{ action: '', node: output.initial_node, memory: cachedInput.assignment }, ...output.trace] as step}
-              <div class="line-clamp-1 max-w-[25ch] text-sm">
+            {#each [{ action: '', node: output.initial_node, memory: cachedInput.assignment }, ...output.trace] as step, i}
+              <div
+                class="line-clamp-1 max-w-[25ch] text-sm {highlightedTraceIndices.has(i)
+                  ? 'bg-white/10'
+                  : ''}"
+              >
                 <code>{step.action}</code>
               </div>
-              <div class="text-center">{toSubscript(step.node)}</div>
+              <div class="text-center {highlightedTraceIndices.has(i) ? 'bg-white/10' : ''}">
+                {toSubscript(step.node)}
+              </div>
               {#if meta.length == 0}
-                <div></div>
+                <div class={highlightedTraceIndices.has(i) ? 'bg-white/10' : ''}></div>
               {/if}
               {#each meta as v}
-                <div class="px-1 text-right font-mono text-slate-300">
+                <div
+                  class="px-1 text-right font-mono text-slate-300 {highlightedTraceIndices.has(i)
+                    ? 'bg-white/10'
+                    : ''}"
+                >
                   {v.kind == 'Array'
                     ? JSON.stringify(step.memory.arrays[v.name])
                     : step.memory.variables[v.name]}
@@ -162,7 +281,12 @@
 
       <div class="relative">
         <div class="absolute inset-0 grid overflow-auto">
-          <Network dot={output.dot} />
+          <Network
+            dot={showReference.show
+              ? output.dot
+              : highlightDot(output.dot, output.initial_node, output.trace, output.termination)}
+            onclick={onGraphClick}
+          />
         </div>
       </div>
     </div>
