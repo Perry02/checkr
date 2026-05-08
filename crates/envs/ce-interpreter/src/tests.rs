@@ -15,6 +15,7 @@ fn initially_stuck_program() {
         determinism: Determinism::Deterministic,
         assignment: Default::default(),
         trace_length: 1,
+        level: 8,
     };
     let output = InterpreterEnv::run(&input).unwrap();
     match InterpreterEnv::validate(&input, &output).unwrap().0 {
@@ -49,6 +50,7 @@ fn test_true_skip() {
             arrays: Default::default(),
         },
         trace_length: 11,
+        level: 8,
     };
     let output = InterpreterEnv::run(&input).unwrap();
     match InterpreterEnv::validate(&input, &output).unwrap().0 {
@@ -86,6 +88,7 @@ fn test_thingy() {
             arrays: Default::default(),
         },
         trace_length: 11,
+        level: 8,
     };
     let output = InterpreterEnv::run(&input).unwrap();
     match InterpreterEnv::validate(&input, &output).unwrap().0 {
@@ -113,6 +116,7 @@ fn empty_trace_running() {
             arrays: Default::default(),
         },
         trace_length: 1,
+        level: 8,
     };
     let output = Output {
         initial_node: Node::Start.to_string(),
@@ -147,6 +151,7 @@ fn empty_trace_terminated() {
             arrays: Default::default(),
         },
         trace_length: 1,
+        level: 8,
     };
     let output = Output {
         initial_node: Node::Start.to_string(),
