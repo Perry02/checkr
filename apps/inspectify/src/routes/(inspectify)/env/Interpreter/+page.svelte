@@ -18,7 +18,7 @@
     determinism: GCL.DETERMINISM[0],
     assignment: { variables: {}, arrays: {} },
     trace_length: 10,
-    level: 8,
+    level: 1,
   });
   let vars = $derived(io.meta ?? []);
 
@@ -105,6 +105,7 @@
     { n: 6, name: 'Nondeterminism' },
     { n: 7, name: 'Undefined' },
     { n: 8, name: 'Composition' },
+    { n: 9, name: 'Random' },
   ];
 
   let highlightedTraceIndices = $state(new Set<number>());
@@ -178,11 +179,11 @@
         </div>
       </InputOptions>
       <InputOptions>
-        <InputOption title="Number of steps">
+        <!-- <InputOption title="Number of steps">
           <div class="w-full font-mono">
             <ParsedInput type="int" bind:value={io.input.trace_length} />
           </div>
-        </InputOption>
+        </InputOption> -->
         <LevelInput bind:level={io.level} {LEVELS} />
         <DeterminismInput input={io.input} />
       </InputOptions>
