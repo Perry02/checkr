@@ -207,10 +207,10 @@ pub fn gen_input_for_level<R: rand::Rng>(level: u32, mut rng: &mut R) -> Input {
     let initial_memory = gcl::memory::Memory::from_targets_with(
         commands.fv(),
         &mut rng,
-        |rng, _| rng.random_range(-10..=10),
+        |rng, _| rng.random_range(-20..=20),
         |rng, _| {
             let len = rng.random_range(5..=10);
-            (0..len).map(|_| rng.random_range(-10..=10)).collect()
+            (0..len).map(|_| rng.random_range(-20..=20)).collect()
         },
     );
     let assignment = InterpreterMemory {

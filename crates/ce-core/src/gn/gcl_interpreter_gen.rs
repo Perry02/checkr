@@ -478,7 +478,55 @@ fn lvl_undefined(_cx: &mut CompilerContext) -> GenOptionsNested<Commands> {
 // ? helper functions
 
 fn gen_assignment<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Command {
-    Command::Assignment(gen_target(cx, rng), gen_aexpr(cx, rng))
+    Command::Assignment(gen_defined_reference(cx, rng), gen_aexpr(cx, rng))
+}
+
+fn gen_defined_reference<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Target<Box<AExpr>> {
+    let generation_options: GenOptions<Target<Box<AExpr>>> = vec![
+        (
+            if cx.names.is_empty() { 0.0 } else { 0.7 },
+            Box::new(|cx: &mut CompilerContext, rng: &mut ErasedRng| {
+                Target::Variable(Variable(cx.names.choose(rng).cloned().unwrap()))
+            }),
+        ),
+        (
+            if cx.no_arrays { 0.0 } else { 0.3 },
+            Box::new(|cx: &mut CompilerContext, rng: &mut ErasedRng| {
+                let name = cx
+                    .array_names
+                    .choose(rng)
+                    .cloned()
+                    .unwrap_or_else(|| "A".into());
+
+                let mut aexpr = gen_aexpr(cx, rng);
+                let aprox_size = aexpr_resolve(aexpr.clone());
+
+                if aprox_size < 0 {
+                    aexpr = AExpr::Minus(Box::new(aexpr));
+                }
+
+                // brute force fix as references are not carried over
+                if aprox_size > 5 {
+                    aexpr = AExpr::Binary(
+                        Box::new(aexpr),
+                        AOp::Minus,
+                        Box::new(AExpr::Number((aprox_size + 1) / 2)),
+                    );
+                }
+
+                Target::Array(Array(name), Box::new(aexpr))
+            }),
+        ),
+    ];
+
+    let mut erng = SmallRng::seed_from_u64(rng.random());
+
+    let choice: Target<Box<AExpr>> = generation_options
+        .choose_weighted(&mut erng, |item| item.0)
+        .unwrap()
+        .1(cx, &mut erng);
+
+    choice
 }
 
 pub fn gen_bexpr_stuck<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> BExpr {
