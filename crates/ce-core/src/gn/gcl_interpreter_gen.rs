@@ -1,3 +1,5 @@
+use std::panic;
+
 use gcl::ast::{
     AExpr, AOp, Array, BExpr, Command, Commands, Guard, LogicOp, RelOp, Target, Variable,
 };
@@ -787,13 +789,15 @@ pub fn aexpr_resolve(a: AExpr) -> i32 {
                     }
                     l_var / r_var
                 }
-                AOp::Pow => l_var.pow(match r_var.try_into() {
-                    Ok(var) => var,
-                    Err(_) => match (-r_var).try_into() {
+                AOp::Pow => l_var
+                    .checked_pow(match r_var.try_into() {
                         Ok(var) => var,
-                        Err(_) => 1,
-                    },
-                }),
+                        Err(_) => match (-r_var).try_into() {
+                            Ok(var) => var,
+                            Err(_) => 1,
+                        },
+                    })
+                    .unwrap_or_default(),
             }
         }
         AExpr::Minus(aexpr) => -aexpr_resolve(aexpr.simplify()),
