@@ -787,7 +787,13 @@ pub fn aexpr_resolve(a: AExpr) -> i32 {
                     }
                     l_var / r_var
                 }
-                AOp::Pow => l_var.pow(r_var as u32),
+                AOp::Pow => {
+                    if r_var < 0 {
+                        l_var.pow((r_var * -1) as u32)
+                    } else {
+                        l_var.pow(r_var as u32)
+                    }
+                }
             }
         }
         AExpr::Minus(aexpr) => -aexpr_resolve(aexpr.simplify()),
