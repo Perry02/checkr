@@ -112,7 +112,9 @@ export namespace Calculator {
 export namespace Compiler {
   export type Input = {
     commands: string,
-    determinism: GCL.Determinism
+    determinism: GCL.Determinism,
+    witness_mems: Interpreter.InterpreterMemory[],
+    level: number
   };
   export type Output = {
     dot: string
@@ -139,7 +141,8 @@ export namespace Interpreter {
     commands: string,
     determinism: GCL.Determinism,
     assignment: Interpreter.InterpreterMemory,
-    trace_length: number
+    trace_length: number,
+    level: number
   };
   export type Output = {
     initial_node: string,
@@ -375,8 +378,10 @@ export namespace inspectify {
     };
     export type GenerateParams = {
       analysis: ce_shell.Analysis,
-      seed: (number | null)
+      seed: (number | null),
+      level: (number | null)
     };
+    
     export type Event =
       | { "type": "Reset" }
       | { "type": "CompilationStatus", "value": { status: inspectify.endpoints.CompilationStatus } }
