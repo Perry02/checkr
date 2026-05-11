@@ -21,7 +21,7 @@ members = [
 [workspace.package]
 version = "0.3.0"
 edition = "2024"
-repository = "https://github.com/team-checkr/checkr/"
+repository = "https://github.com/Perry02/checkr/"
 authors = [
     "Oliver Bøving <oliver@bvng.dk>",
     "Camilla Færch <camilla_faerch@hotmail.com>",
