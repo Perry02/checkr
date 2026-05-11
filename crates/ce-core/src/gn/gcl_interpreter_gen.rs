@@ -7,7 +7,9 @@ use rand::{
     seq::{IndexedRandom, SliceRandom},
 };
 
-use crate::gn::compiler_gen::{CompilerContext, gen_aexpr, gen_bexpr, gen_guard, gen_target};
+use crate::gn::compiler_gen::{
+    CompilerContext, gen_aexpr, gen_aop, gen_bexpr, gen_guard, gen_target,
+};
 type ErasedRng = SmallRng;
 
 type GenFn<G> = Box<dyn Fn(&mut CompilerContext, &mut ErasedRng) -> G>;
@@ -478,10 +480,10 @@ fn lvl_undefined(_cx: &mut CompilerContext) -> GenOptionsNested<Commands> {
 // ? helper functions
 
 fn gen_assignment<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Command {
-    Command::Assignment(gen_defined_reference(cx, rng), gen_aexpr(cx, rng))
+    Command::Assignment(gen_reference_defined(cx, rng), gen_aexpr_defined(cx, rng))
 }
 
-fn gen_defined_reference<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Target<Box<AExpr>> {
+fn gen_reference_defined<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Target<Box<AExpr>> {
     let generation_options: GenOptions<Target<Box<AExpr>>> = vec![
         (
             if cx.names.is_empty() { 0.0 } else { 0.7 },
@@ -498,7 +500,7 @@ fn gen_defined_reference<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Targe
                     .cloned()
                     .unwrap_or_else(|| "A".into());
 
-                let mut aexpr = gen_aexpr(cx, rng);
+                let mut aexpr = gen_aexpr_defined(cx, rng);
                 let aprox_size = aexpr_resolve(aexpr.clone());
 
                 if aprox_size < 0 {
@@ -522,6 +524,62 @@ fn gen_defined_reference<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> Targe
     let mut erng = SmallRng::seed_from_u64(rng.random());
 
     let choice: Target<Box<AExpr>> = generation_options
+        .choose_weighted(&mut erng, |item| item.0)
+        .unwrap()
+        .1(cx, &mut erng);
+
+    choice
+}
+
+pub fn gen_aexpr_defined<R: Rng>(cx: &mut CompilerContext, rng: &mut R) -> AExpr {
+    let generation_options: GenOptions<AExpr> = vec![
+        (
+            0.4,
+            Box::new(|_cx: &mut CompilerContext, rng: &mut ErasedRng| {
+                AExpr::Number(rng.random_range(-100..=100))
+            }),
+        ),
+        (
+            if cx.names.is_empty() && cx.array_names.is_empty() {
+                0.0
+            } else {
+                0.8
+            },
+            Box::new(|cx: &mut CompilerContext, rng: &mut ErasedRng| {
+                AExpr::Reference(gen_reference_defined(cx, rng))
+            }),
+        ),
+        (
+            if cx.recursion_limit == 0 || cx.fuel == 0 {
+                0.0
+            } else {
+                0.9
+            },
+            Box::new(|cx: &mut CompilerContext, rng: &mut ErasedRng| {
+                cx.recursion_limit = cx.recursion_limit.checked_sub(1).unwrap_or_default();
+                AExpr::binary(
+                    gen_aexpr_defined(cx, rng),
+                    gen_aop(cx, rng),
+                    gen_aexpr_defined(cx, rng),
+                )
+            }),
+        ),
+        (
+            if cx.recursion_limit == 0 || cx.fuel == 0 {
+                0.0
+            } else {
+                0.4
+            },
+            Box::new(|cx: &mut CompilerContext, rng: &mut ErasedRng| {
+                cx.recursion_limit = cx.recursion_limit.checked_sub(1).unwrap_or_default();
+                AExpr::Minus(Box::new(gen_aexpr_defined(cx, rng)))
+            }),
+        ),
+    ];
+
+    let mut erng = SmallRng::seed_from_u64(rng.random());
+
+    let choice = generation_options
         .choose_weighted(&mut erng, |item| item.0)
         .unwrap()
         .1(cx, &mut erng);
