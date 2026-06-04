@@ -179,11 +179,11 @@
         </div>
       </InputOptions>
       <InputOptions>
-        <!-- <InputOption title="Number of steps">
+        <InputOption title="Number of steps">
           <div class="w-full font-mono">
             <ParsedInput type="int" bind:value={io.input.trace_length} />
           </div>
-        </InputOption> -->
+        </InputOption>
         <LevelInput bind:level={io.level} {LEVELS} />
         <DeterminismInput input={io.input} />
       </InputOptions>
