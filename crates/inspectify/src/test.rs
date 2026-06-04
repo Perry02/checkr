@@ -1,11 +1,17 @@
 use std::{collections::HashSet, fs, str::FromStr};
 
 use crate::endpoints::InspectifyJobMeta;
-use ce_core::Generate;
+use ce_core::{
+    Generate,
+    gn::{
+        compiler_gen::CompilerContext,
+        interpreter_gen::{InterpreterContext, generate_selective},
+    },
+};
 use ce_shell::Analysis;
 use driver::JobKind;
 use gcl::pg::Determinism;
-use rand::{SeedableRng, seq::IndexedRandom};
+use rand::{Rng, SeedableRng, seq::IndexedRandom};
 use roxmltree::Document;
 
 fn covered_lines(xml: &str, file_filter: &str) -> HashSet<(String, u32)> {
@@ -136,7 +142,6 @@ async fn coverage_test(
                 args.as_str(),
             ],
         );
-
         job.wait().await;
 
         let xml_path = cwd.join("coverage.xml");
@@ -213,26 +218,79 @@ fn compiler_input_new_gen(seed: usize) -> (String, String) {
     )
 }
 
+fn to_fsharp_interpreter_json(
+    commands: &gcl::ast::Commands,
+    determinism: Determinism,
+    assignment: &gcl::interpreter::InterpreterMemory,
+    trace_length: i32,
+    level: u32,
+) -> String {
+    let commands_str = commands.to_string();
+    let det_str = match determinism {
+        Determinism::Deterministic => "Deterministic",
+        Determinism::NonDeterministic => "NonDeterministic",
+    };
+    let vars_json = serde_json::to_string(&assignment.variables).unwrap();
+    let arrays_json = serde_json::to_string(&assignment.arrays).unwrap();
+    format!(
+        r#"{{"commands":{},"determinism":"{}","assignment":{{"variables":{},"arrays":{}}},"trace_length":{},"level":{}}}"#,
+        serde_json::to_string(&commands_str).unwrap(),
+        det_str,
+        vars_json,
+        arrays_json,
+        trace_length,
+        level,
+    )
+    .replace('"', "\\\"")
+}
+
 fn interpreter_input_old_gen(seed: usize) -> (String, String) {
     let mut rng = rand::rngs::SmallRng::seed_from_u64(seed as u64);
     let commands = gcl::ast::Commands::gn(&mut Default::default(), &mut rng);
     let determinism = *[Determinism::Deterministic, Determinism::NonDeterministic]
         .choose(&mut rng)
         .unwrap();
+    let assignment = make_memory(&commands, &mut rng);
+    let trace_length = rng.random_range(10..=15);
     (
         "Interpreter".to_string(),
-        to_fsharp_compiler_json(&commands, determinism),
+        to_fsharp_interpreter_json(&commands, determinism, &assignment, trace_length, 8),
     )
+}
+fn make_memory<R: rand::Rng>(
+    commands: &gcl::ast::Commands,
+    rng: &mut R,
+) -> gcl::interpreter::InterpreterMemory {
+    let mem = gcl::memory::Memory::from_targets_with(
+        commands.fv(),
+        rng,
+        |rng, _| rng.random_range(-20..=20),
+        |rng, _| {
+            let len = rng.random_range(5..=10);
+            (0..len).map(|_| rng.random_range(-20..=20)).collect()
+        },
+    );
+    gcl::interpreter::InterpreterMemory {
+        variables: mem.variables,
+        arrays: mem.arrays,
+    }
 }
 
 fn interpreter_input_new_gen(seed: usize) -> (String, String) {
-    use ce_core::gn::interpreter_gen::InterpreterContext;
     let mut rng = rand::rngs::SmallRng::seed_from_u64(seed as u64);
-
-    let analysis = Analysis::from_str("Interpreter").expect("failure");
-    let input = analysis.gen_input_seeded(Some(seed as u64));
-
-    ("Interpreter".to_string(), input.to_string())
+    let (commands, mem) = generate_selective(
+        &mut InterpreterContext::new(1, CompilerContext::new(10), &mut rng),
+        &mut rng,
+    );
+    let determinism = *[Determinism::Deterministic, Determinism::NonDeterministic]
+        .choose(&mut rng)
+        .unwrap();
+    let assignment = mem;
+    let trace_length = rng.random_range(10..=15);
+    (
+        "Interpreter".to_string(),
+        to_fsharp_interpreter_json(&commands, determinism, &assignment, trace_length, 8),
+    )
 }
 
 struct RepoResult {
@@ -308,7 +366,7 @@ async fn test_thingy() {
             "old gcl_gen",
             "Interpreter.fs",
             test_amount,
-            compiler_input_old_gen,
+            interpreter_input_old_gen,
         )
         .await;
 
@@ -320,7 +378,7 @@ async fn test_thingy() {
             "new gcl_gen",
             "Interpreter.fs",
             test_amount,
-            compiler_input_new_gen,
+            interpreter_input_new_gen,
         )
         .await;
 
