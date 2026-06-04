@@ -213,6 +213,28 @@ fn compiler_input_new_gen(seed: usize) -> (String, String) {
     )
 }
 
+fn interpreter_input_old_gen(seed: usize) -> (String, String) {
+    let mut rng = rand::rngs::SmallRng::seed_from_u64(seed as u64);
+    let commands = gcl::ast::Commands::gn(&mut Default::default(), &mut rng);
+    let determinism = *[Determinism::Deterministic, Determinism::NonDeterministic]
+        .choose(&mut rng)
+        .unwrap();
+    (
+        "Interpreter".to_string(),
+        to_fsharp_compiler_json(&commands, determinism),
+    )
+}
+
+fn interpreter_input_new_gen(seed: usize) -> (String, String) {
+    use ce_core::gn::interpreter_gen::InterpreterContext;
+    let mut rng = rand::rngs::SmallRng::seed_from_u64(seed as u64);
+
+    let analysis = Analysis::from_str("Interpreter").expect("failure");
+    let input = analysis.gen_input_seeded(Some(seed as u64));
+
+    ("Interpreter".to_string(), input.to_string())
+}
+
 struct RepoResult {
     name: String,
     old_unique: usize,
@@ -229,7 +251,7 @@ async fn test_thingy() {
     //   dotnet tool install -g dotnet-coverage
     //   Each repo must already be compiled: dotnet publish -c Release --self-contained --output bin/run
 
-    let student_repos_root = "D:/checkr/Student-repos-for-testing";
+    let student_repos_root = "E:/GitHub/checkr/Student-repos-for-testing";
     let test_amount = 50;
 
     if !std::path::Path::new(student_repos_root).exists() {
@@ -284,7 +306,7 @@ async fn test_thingy() {
             &cwd,
             &driver,
             "old gcl_gen",
-            "Compiler.fs",
+            "Interpreter.fs",
             test_amount,
             compiler_input_old_gen,
         )
@@ -296,7 +318,7 @@ async fn test_thingy() {
             &cwd,
             &driver,
             "new gcl_gen",
-            "Compiler.fs",
+            "Interpreter.fs",
             test_amount,
             compiler_input_new_gen,
         )
