@@ -199,24 +199,10 @@ impl Generate for Input {
 }
 
 pub fn gen_input_for_level<R: rand::Rng>(level: u32, mut rng: &mut R) -> Input {
-    let commands = generate_selective(
+    let (commands, mem) = generate_selective(
         &mut InterpreterContext::new(level, CompilerContext::new(10), rng),
         rng,
     );
-
-    let initial_memory = gcl::memory::Memory::from_targets_with(
-        commands.fv(),
-        &mut rng,
-        |rng, _| rng.random_range(-20..=20),
-        |rng, _| {
-            let len = rng.random_range(5..=10);
-            (0..len).map(|_| rng.random_range(-20..=20)).collect()
-        },
-    );
-    let assignment = InterpreterMemory {
-        variables: initial_memory.variables,
-        arrays: initial_memory.arrays,
-    };
 
     let determinism = *[Determinism::Deterministic, Determinism::NonDeterministic]
         .choose(rng)
@@ -225,7 +211,7 @@ pub fn gen_input_for_level<R: rand::Rng>(level: u32, mut rng: &mut R) -> Input {
     Input {
         commands: Stringify::new(commands),
         determinism,
-        assignment,
+        assignment: mem,
         trace_length: rng.random_range(10..=15),
         level,
     }
